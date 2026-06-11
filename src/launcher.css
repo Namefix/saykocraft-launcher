@@ -1,0 +1,387 @@
+body {
+    background-color: var(--sayko-background);
+    background-image: var(--earth-bg);
+    background-size: cover;
+    backdrop-filter: blur(10px) grayscale(100%) saturate(200%) brightness(50%);
+}
+
+/* 
+
+            SIDEBAR
+
+*/
+
+.sideBar {
+    flex: 0 0 80px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 80px;
+    height: 100%;
+    
+    background-color: #151515;
+}
+
+.sideBar .server {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    margin-top: 12px;
+
+    position: relative;
+
+    background-color: rgb(34, 34, 34);
+    background-size: contain;
+    transition: opacity 0.1s;
+    cursor: pointer;
+}
+
+.sideBar .server span { /* tooltip */
+    visibility: hidden;
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: max-content;
+    background-color: #383838;
+    color: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    padding: 8px;
+    border-radius: 8px;
+    z-index: 1;
+}
+
+.sideBar .server span::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    border-right: 8px solid #383838;
+}
+
+.sideBar .server:hover span {
+    visibility: visible;
+}
+
+.sideBar .server:first-child {
+    margin-top: 16px;
+}
+
+.sideBar .server:not(.selected):not(.unselectable):hover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+    pointer-events: none;
+}
+
+.sideBar .server.selected {
+    border: 2px solid var(--saykocraft-green);
+    box-sizing: border-box;
+    cursor: default;
+}
+
+.sideBar .icon-settings {
+    width: 32px;
+    height: 32px;
+    margin-top: auto;
+    color: #FFFFFF;
+    cursor: pointer;
+    transition: transform 0.3s ease-in-out, opacity 0.1s, color 0.1s;
+}
+
+.sideBar .icon-settings:not(.selected):hover {
+    opacity: 0.9;
+    transform: rotateZ(180deg);
+}
+
+.sideBar .icon-settings.selected {
+    color: var(--saykocraft-green);
+    cursor: default;
+}
+
+.sideBar .account {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    margin-top: 12px;
+    margin-bottom: 16px;
+    position: relative;
+
+    background-color: rgb(34, 34, 34);
+    background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAAOtJREFUGJUFwb9Kw0AAwOFfLpdcUmmrUJoihQo+gC/gLIJrd4eCi48g7oKbgy4+gLg41EEdiquvoFCtFrVDCZTUcsn98fuCna26Nw5kINDWYIxFCEEkQ7wHaRwAGO9YS2KacYAlZF5orLdIgPPjQ1QUkyYNVssFhIL895uzuweC29MjX1OKP60JQ0W+yOllbSYfrwCImlIcnFxw87xNUpX0sjZX9xmDyyGN1ibB9WDPZ50uUq0zHI0A6O/vMv18YzybI4vKUk7HTL6W1EUEwOPTC51uSkCEfP+Z4ZyjtdEEQFclqUooVhZdlfwDnGFZBGfsVakAAAAASUVORK5CYII=");
+    background-size: contain;
+    background-repeat: no-repeat;
+    image-rendering: pixelated;
+}
+
+.sideBar .account span { /* tooltip */
+    visibility: hidden;
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: max-content;
+    background-color: #383838;
+    color: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    padding: 8px;
+    border-radius: 8px;
+    z-index: 1;
+}
+
+.sideBar .account span::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    border-right: 8px solid #383838;
+}
+
+.sideBar .account:hover span {
+    visibility: visible;
+}
+
+/*
+
+        CENTER DIV
+
+*/
+
+.centerDiv {
+    flex: 1;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+}
+
+.centerpage {
+    display: none;
+}
+
+.centerpage.is-active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 1. MODPACK MAIN PAGE */
+
+.centerDiv .server-logo {
+    width: 454px;
+    height: 114px;
+    align-self: center;
+    filter: drop-shadow(0px 4px 4px rgba(0, 0, 0, 0.3));
+}
+
+.centerDiv .modpack-buttons {
+    display: flex;
+    justify-content: center;
+}
+
+.centerDiv .button-action {
+    display: flex;
+    width: 128px;
+    height: 48px;
+    margin-top: 16px;
+    justify-content: center;
+    align-items: center;
+
+    outline: 0;
+    box-sizing: border-box;
+    border: 2px solid #B8B8B8;
+    border-radius: 12px;
+    background-color: #7d7d7d;
+    
+    color: #FFFFFF;
+    font-weight: 900;
+    font-size: 24px;
+    cursor: pointer;
+    font-family: "Poppins";
+
+    transition: border-radius 0.1s;
+}
+
+.centerDiv .button-action:hover {
+    opacity: 0.8;
+}
+
+.button-action.start {
+    border-color: var(--button-start-border);
+    background-color: var(--button-start-background);
+}
+
+.button-action .icon-play {
+    width: 32px;
+    height: 32px;
+    margin-right: 4px;
+}
+
+.centerDiv .button-pack-settings {
+    display: flex;
+    width: 48px;
+    height: 48px;
+    margin-top: 16px;
+    margin-left: 16px;
+    justify-content: center;
+    align-items: center;
+
+    outline: 0;
+    box-sizing: border-box;
+    border: 2px solid #656565;
+    border-radius: 12px;
+    background-color: #222222;
+    position: relative;
+    
+    color: #FFFFFF;
+    font-weight: 900;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.button-pack-settings.warning::before { /* BADGE */
+    content: '';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 16px;
+    height: 16px;
+    background-color: var(--sayko-red);
+    border-radius: 100%;
+    box-sizing: border-box;
+    display: block;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.button-pack-settings .icon-settings {
+    width: 32px;
+    height: 32px;
+    color: #FFFFFF;
+    cursor: pointer;
+    margin-top: 1px;
+    vertical-align: middle;
+    transition: transform 0.3s ease-in-out, opacity 0.1s, color 0.1s;
+}
+
+.button-pack-settings:hover .icon-settings {
+    opacity: 0.9;
+    transform: rotateZ(180deg);
+}
+
+/* 2. COMMON */
+
+.settings-div {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.centerpage-launchersettings .settings-div {
+    flex: 1;
+}
+
+.settings-title {
+    margin-bottom: 32px;
+    color: #ffffff;
+    font-size: 36px;
+    font-weight: bold;
+}
+
+.setting-div {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.setting-title {
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 500;
+}
+
+.setting-textinput {
+    width: 284px;
+    height: 38px;
+    border-radius: 6px;
+    font-size: 18;
+    color: #c6c6c6;
+}
+
+.version-text {
+    color: #3B3B3B;
+    font-weight: 500;
+    font-size: 18px;
+}
+
+/* 3. LAUNCHER SETTINGS */
+
+.centerpage-launchersettings {
+    width: 100%;
+    height: 100%;
+    padding: 16px;
+    padding-left: 24px;
+    box-sizing: border-box;
+
+    background-color: var(--sayko-background);
+}
+
+.centerpage-launchersettings .logout-div {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: auto;
+}
+
+.centerpage-launchersettings .logout-button {
+    width: 128px;
+    font-weight: 600;
+}
+
+.logout-button:hover {
+    opacity: 0.8;
+}
+
+.centerDiv .loading-bar {
+    position: absolute;
+    visibility: hidden;
+    opacity: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #363636;
+    height: 8px;
+    box-sizing: border-box;
+
+    transition: opacity 0.3s ease, visibility 0s ease 0.3s;
+}
+
+.loading-bar.active {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.3s ease, visibility 0s ease 0s;
+}
+
+.centerDiv .loading-bar .bar-progress {
+    width: 0%;
+    height: 100%;
+    background-color: var(--saykocraft-green);
+
+    transition: width 0.3s;
+}

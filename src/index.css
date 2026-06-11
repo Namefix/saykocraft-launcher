@@ -1,0 +1,223 @@
+body {
+    background-color: #181818;
+}
+
+.titleBar {
+    background-color: transparent;
+    z-index: 9999;
+}
+
+.logoDiv {
+    display: flex;
+    position: absolute;
+    width: auto;
+    height: auto;
+    left: 0;
+    right: 0;
+    transform: none;
+    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+}
+
+.logoDiv .saykocraft-logo {
+    width: clamp(280px, 80%, 480px);
+    max-width: 480px;
+    aspect-ratio: 235 / 36;
+
+    margin-top: 100px;
+}
+
+.centerDiv {
+    display: flex;
+    width: auto;
+    height: 100%;
+
+    position: relative;
+    z-index: 1;
+
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-actions {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.centerDiv input {
+    margin-bottom: 16px;
+    transition: opacity 0.1s, border-color 0.1s;
+}
+
+.centerDiv input:hover {
+    opacity: 0.8;
+}
+
+.centerDiv input:last-of-type {
+    margin-bottom: 4px;
+}
+
+.centerDiv .forget-password {
+    text-decoration: none;
+    color: #838383;
+    font-style: italic;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+.centerDiv .forget-password:hover {
+    text-decoration: underline;
+}
+
+.centerDiv button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.centerDiv button:disabled {
+    cursor: wait;
+    opacity: 0.9;
+}
+
+.centerDiv button:hover {
+    opacity: 0.8;
+}
+
+.centerDiv button.is-loading:hover {
+    opacity: 1;
+}
+
+.centerDiv button .button-spinner {
+    width: 18px;
+    height: 18px;
+    border: 3px solid rgba(255, 255, 255, 0.22);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.centerDiv .error-message {
+    color: #DF2121;
+    font-weight: 500;
+    font-size: 20px;
+    display: block;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: calc(100% + 8px);
+    width: max-content;
+    max-width: min(92vw, 420px);
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
+
+.footerDiv {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 12px 0;
+    flex-direction: column;
+}
+
+.footerDiv .icon-discord {
+    width: 32px;
+    height: 32px;
+    color: #FFFFFF;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.footerDiv a .icon-discord:hover {
+    opacity: 0.8;
+}
+
+/* loading animation */
+.loadingDiv {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 24px;
+}
+
+.loadingDiv .spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid #2B2B2B;
+    border-top-color: var(--saykocraft-green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loadingDiv .loading-text {
+    font-size: 20px;
+    font-weight: bolder;
+    color: #ffffff;
+    margin: 0;
+    letter-spacing: 0.5px;
+}
+
+.loadingDiv.has-error .spinner,
+.loadingDiv.has-error .loading-text {
+    display: none;
+}
+
+.session-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.session-error-message {
+    color: #DF2121;
+    font-weight: 600;
+    font-size: 18px;
+    max-width: min(92vw, 420px);
+    text-align: center;
+}
+
+.retry-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 200px;
+    height: 42px;
+
+    background-color: #1D1D1D;
+    border: 1px solid #3D3D3D;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-family: 'Poppins';
+    font-size: 18px;
+    font-weight: 600;
+
+    cursor: pointer;
+    transition: 0.1s opacity;
+    box-shadow: 0px 4px 4.8px rgba(0,0,0,0.5);
+}
+
+.retry-button:hover {
+    opacity: 0.8;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

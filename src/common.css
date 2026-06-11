@@ -1,0 +1,238 @@
+:root {
+    --sayko-background: #1B1B1B;
+    --sayko-red: #E51111;
+    --saykocraft-green: #39E317;
+
+    --button-start-border: #39E317;
+    --button-start-background: #36A121;
+    --button-stop: #DF2121;
+    --button-update: #B8B8B8;
+    --button-download: #6C6C6C;
+
+    --earth-logo: url("assets/images/earth-logo.png");
+    --mystery-logo: url("assets/images/itsamystery.png");
+    --earth-bg: url("assets/images/earth-bg.png");
+}
+
+body {
+    margin: 0;
+    font-family: 'Poppins';
+    user-select: none;
+    -webkit-user-select: none;
+    background-color: var(--sayko-background);
+}
+
+img {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+button {
+    width: 284px;
+    height: 48px;
+    
+    background-color: #1D1D1D;
+    border: 1px solid #3D3D3D;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-family: 'Poppins';
+    font-size: 24px;
+    font-weight: bold;
+
+    cursor: pointer;
+    transition: 0.1s opacity;
+    box-shadow: 0px 4px 4.8px rgba(0,0,0,0.5);
+}
+
+.button-danger {
+    background-color: #A12121;
+    border-color: #DF2121;
+}
+
+input[type="text"], input[type="password"] {
+    width: 284px;
+    height: 48px;
+    border-radius: 8px;
+    padding-left: 8px;
+
+    font-family: 'Poppins';
+    font-size: 20px;
+    font-weight: 500;
+    color: #c6c6c6;
+    background-color: #2B2B2B;
+    border: solid 1px #3F3F3F;
+    transition: border 0.1s;
+
+    box-shadow: 0px 4px 4.8px rgba(0,0,0,0.5);
+}
+
+input:focus {
+    outline: none;
+    border: solid 1px var(--saykocraft-green);
+    color: #f9f9f9;
+}
+
+select {
+    width: 128px;
+    height: 38px;
+
+    appearance: none;
+    color: #c6c6c6;
+    font-family: 'Poppins';
+    font-size: 18px;
+    font-weight: 500;
+    background-color: #2B2B2B;
+    border: solid 1px #3F3F3F;
+    transition: border 0.1s;
+    text-align-last: center;
+    outline: 0;
+    
+    box-shadow: 0px 4px 4.8px rgba(0,0,0,0.5);
+}
+
+select:focus {
+    color: #f9f9f9;
+    border: solid 1px var(--saykocraft-green);
+}
+
+.switch {
+    font-size: 17px;
+    position: relative;
+    display: inline-block;
+    width: 70px;
+    height: 32px;
+}
+
+.switch input {
+    display: none;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #2B2B2B;
+    transition: .2s;
+    border: 1px solid #3F3F3F;
+    border-radius: 8px;
+    box-shadow: 0px 4px 4px rgba(0,0,0,0.5);
+}
+
+/* knob */
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 32px;
+    width: 32px;
+    border-radius: 8px;
+    background-color: #5D5D5D;
+    transition: .2s;
+    top: -1.5px;
+    left: -1px;
+}
+
+input:checked + .slider::before {
+    background-color: #39E317;
+}
+
+input:checked + .slider {
+    background-color: #2A5921;
+    border-color: #359322;
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px #2A5921;
+}
+
+input:checked + .slider:before {
+    transform: translateX(38px);
+}
+
+.hidden {
+    display: none !important;
+}
+
+.unselectable {
+    cursor: not-allowed !important;
+}
+
+.main {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+}
+
+.content {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.titleBar {
+    display: flex;
+    width: 100%;
+    height: 55px;
+    user-select: none;
+
+    background-color: #121212;
+}
+
+.titleBar-drag {
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.titleBar span {
+    align-self: center;
+    margin-left: 16px;
+
+    color: #FFFFFF;
+    font-size: 24px;
+    font-weight: 700;
+    cursor: default;
+}
+
+.titleBar img {
+    align-self: center;
+    margin-left: 16px;
+
+    width: 253px;
+    height: 39px;
+    cursor: default;
+}
+
+.windowControls {
+    margin-left: auto !important;
+    align-self: center;
+}
+
+.windowControls .icon {
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    margin-left: 0;
+    color: #FFFFFF;
+    vertical-align: middle;
+    transition: color 0.1s;
+}
+
+.windowControls .icon-close {
+    margin-right: 16px;
+    margin-left: 8px;
+}
+
+.windowControls .icon-close:hover {
+    color: #FF5757;
+}
+
+.windowControls .icon-minimize:hover {
+    color: #7d7d7d;
+}

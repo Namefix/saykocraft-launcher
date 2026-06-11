@@ -1,0 +1,36 @@
+# Rust/Cargo
+Cargo.lock
+debug/
+target/
+**/*.rs.bk
+*.pdb
+
+# Tauri
+src-tauri/target/
+src-tauri/logs/
+
+# Node.js (if added later)
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnp
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,68 @@
+<html lang="en">
+<head>
+    <!-- W:512 H:640 -->
+    <link rel="stylesheet" href="fonts.css">
+    <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="index.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SayKOCraft</title>
+    <script src="common.js" defer></script>
+    <script src="index.js" defer></script>
+</head>
+<body>
+    <div class="main">
+        <!-- TITLE BAR -->
+        <div class="titleBar" data-tauri-drag-region>
+            <!--<img class="titleBar-drag" data-tauri-drag-region src="assets/images/saykocraft-hd.png">-->
+
+            <div class="windowControls">
+                <svg onclick="onMinimize()" class="icon icon-minimize" aria-label="Minimize window">
+                    <use href="assets/icons/sprite.svg#minimize"></use>
+                </svg>
+                <svg onclick="onClose()" class="icon icon-close" aria-label="Close window">
+                    <use href="assets/icons/sprite.svg#xmark"></use>
+                </svg>
+            </div>
+        </div>
+
+        <!-- LOGO DIV -->
+        <div class="logoDiv">
+            <img draggable="false" class="saykocraft-logo" src="assets/images/saykocraft-hd.png">
+        </div>
+
+        <!-- LOADING DIV -->
+        <div id="loadingDiv" class="loadingDiv">
+            <div class="spinner"></div>
+            <span class="loading-text">Loading</span>
+            <div id="sessionError" class="session-error hidden">
+                <span class="session-error-message">Network error. Please check your connection.</span>
+                <button id="retrySessionButton" class="retry-button" onclick="retrySession()">Try again</button>
+            </div>
+        </div>
+
+        <!-- CENTER DIV -->
+        <div id="centerDiv" class="centerDiv hidden">
+            <input type="text" id="sayko-username" placeholder="Username">
+            <input type="password" id="sayko-password" placeholder="Password">
+            <a class="forget-password" onclick="openPasswordForget()">forgot password</a>
+            <div class="login-actions">
+                <button id="loginButton" onclick="login()">
+                    <span class="button-label">Login</span>
+                    <span class="button-spinner hidden" aria-hidden="true"></span>
+                </button>
+                <span id="errorMessage" class="error-message hidden">Username or password is incorrect!</span>
+            </div>
+        </div>
+
+        <!-- FOOTER DIV -->
+        <div class="footerDiv">
+            <a onclick="openDiscord()" aria-label="Discord server">
+                <svg class="icon-discord">
+                    <use href="assets/icons/sprite.svg#discord"></use>
+                </svg>
+            </a>
+        </div>
+    </div>
+</body>
+</html>
