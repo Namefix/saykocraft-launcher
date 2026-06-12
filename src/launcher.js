@@ -13,6 +13,8 @@ const LauncherView = Object.freeze({
     MODPACK_SETTINGS: "MODPACK_SETTINGS"
 });
 
+initializeLocalization();
+
 launcherSettingsButton?.addEventListener("click", () => {
     setLauncherView(LauncherView.LAUNCHER_SETTINGS);
 });
@@ -70,7 +72,7 @@ function applySidebarSelection(view) {
 
 async function setUsername() {
     let username = await invoke("get_username");
-    usernameTooltip.innerHTML = username;
+    usernameTooltip.textContent = username;
 }
 async function setProfileIcon() {
     let icon;
@@ -83,7 +85,7 @@ async function setProfileIcon() {
 }
 async function setLauncherVersion() {
     let version = await invoke("get_launcher_version");
-    launcherSettingsVersionText.innerHTML = `saykocraft-launcher v${version}`
+    launcherSettingsVersionText.textContent = `saykocraft-launcher v${version}`
 }
 setUsername();
 setProfileIcon();

@@ -1,4 +1,4 @@
-<html lang="en">
+<html lang="en-US">
 <head>
     <!-- W:512 H:640 -->
     <link rel="stylesheet" href="fonts.css">
@@ -8,6 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SayKOCraft</title>
     <script src="common.js" defer></script>
+    <script src="i18n.js" defer></script>
     <script src="index.js" defer></script>
 </head>
 <body>
@@ -17,10 +18,10 @@
             <!--<img class="titleBar-drag" data-tauri-drag-region src="assets/images/saykocraft-hd.png">-->
 
             <div class="windowControls">
-                <svg onclick="onMinimize()" class="icon icon-minimize" aria-label="Minimize window">
+                <svg onclick="onMinimize()" class="icon icon-minimize" aria-label="Minimize window" data-i18n-aria-label="minimizeWindow">
                     <use href="assets/icons/sprite.svg#minimize"></use>
                 </svg>
-                <svg onclick="onClose()" class="icon icon-close" aria-label="Close window">
+                <svg onclick="onClose()" class="icon icon-close" aria-label="Close window" data-i18n-aria-label="closeWindow">
                     <use href="assets/icons/sprite.svg#xmark"></use>
                 </svg>
             </div>
@@ -34,30 +35,30 @@
         <!-- LOADING DIV -->
         <div id="loadingDiv" class="loadingDiv">
             <div class="spinner"></div>
-            <span class="loading-text">Loading</span>
+            <span class="loading-text" data-i18n="loading">Loading</span>
             <div id="sessionError" class="session-error hidden">
-                <span class="session-error-message">Network error. Please check your connection.</span>
-                <button id="retrySessionButton" class="retry-button" onclick="retrySession()">Try again</button>
+                <span class="session-error-message" data-i18n="error.networkError">Network error. Please check your connection.</span>
+                <button id="retrySessionButton" class="retry-button" onclick="retrySession()" data-i18n="retryAgain">Try again</button>
             </div>
         </div>
 
         <!-- CENTER DIV -->
         <div id="centerDiv" class="centerDiv hidden">
-            <input type="text" id="sayko-username" placeholder="Username">
-            <input type="password" id="sayko-password" placeholder="Password">
-            <a class="forget-password" onclick="openPasswordForget()">forgot password</a>
+            <input type="text" id="sayko-username" placeholder="Username" data-i18n-placeholder="usernamePlaceholder">
+            <input type="password" id="sayko-password" placeholder="Password" data-i18n-placeholder="passwordPlaceholder">
+            <a class="forget-password" onclick="openPasswordForget()" data-i18n="forgotPassword">forgot password</a>
             <div class="login-actions">
                 <button id="loginButton" onclick="login()">
-                    <span class="button-label">Login</span>
+                    <span class="button-label" data-i18n="loginTitle">Login</span>
                     <span class="button-spinner hidden" aria-hidden="true"></span>
                 </button>
-                <span id="errorMessage" class="error-message hidden">Username or password is incorrect!</span>
+                <span id="errorMessage" class="error-message hidden" data-i18n="error.loginInvalidCredentials">Username or password is incorrect!</span>
             </div>
         </div>
 
         <!-- FOOTER DIV -->
         <div class="footerDiv">
-            <a onclick="openDiscord()" aria-label="Discord server">
+            <a onclick="openDiscord()" aria-label="Discord server" data-i18n-aria-label="discordServer">
                 <svg class="icon-discord">
                     <use href="assets/icons/sprite.svg#discord"></use>
                 </svg>

@@ -12,6 +12,8 @@ const loginButtonSpinner = loginButton?.querySelector(".button-spinner");
 const usernameInput = document.getElementById("sayko-username");
 const passwordInput = document.getElementById("sayko-password");
 
+initializeLocalization();
+
 function showLoginError(message) {
     errorMessage.classList.remove("hidden");
     errorMessage.innerHTML = message;
@@ -92,14 +94,14 @@ if (tauriEvent?.listen && invoke) {
     }
 
     if (event.payload === "network-error") {
-        showSessionError("Network error. Please check your connection and try again.");
+        showSessionError(t("error.networkError"));
         return;
     }
 
     if(event.payload === "invalid" || event.payload === "null") {
         showLoginScreen();
         if(event.payload === "invalid") {
-            showLoginError("Your session has expired.");
+            showLoginError(t("error.sessionExpired"));
         } else {
             errorMessage.classList.add("hidden");
         }
@@ -122,7 +124,7 @@ async function retrySession() {
         await invoke("check_session");
     } catch (e) {
         console.error("Failed to check session", e);
-        showSessionError("Network error. Please check your connection and try again.");
+        showSessionError(t("error.networkError"));
     }
 }
 
@@ -143,25 +145,25 @@ async function login() {
         const { code, message } = normalizeInvokeError(e);
         switch (code) {
             case "INVALID_CREDENTIALS":
-                showLoginError("Username or password is incorrect!");
+                showLoginError(t("error.loginInvalidCredentials"));
                 break;
             case "RATE_LIMITED":
-                showLoginError("Too many requests. Please wait and try again.");
+                showLoginError(t("error.loginRateLimited"));
                 break;
             case "AUTH_FAILED":
-                showLoginError("Login failed. Please try again.");
+                showLoginError(t("error.loginAuthFailed"));
                 break;
             case "UPGRADE_REQUIRED":
-                showLoginError("Launcher is outdated. Please update and try again.");
+                showLoginError(t("error.loginUpgradeRequired"));
                 break;
             case "NETWORK_ERROR":
-                showLoginError("Network error. Please check your connection.");
+                showLoginError(t("error.loginNetworkError"));
                 break;
             case "SERVER_ERROR":
-                showLoginError("Server error. Please try again later.");
+                showLoginError(t("error.loginServerError"));
                 break;
             default:
-                showLoginError(message || "Unknown error");
+                showLoginError(message || t("error.loginUnknownError"));
         }
     } finally {
         setLoginPending(false);

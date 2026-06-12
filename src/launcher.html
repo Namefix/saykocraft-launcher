@@ -1,4 +1,4 @@
-<html lang="en">
+<html lang="en-US">
 <head>
     <!-- W:1280 H:768 -->
     <link rel="stylesheet" href="fonts.css">
@@ -8,8 +8,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SayKOCraft</title>
     <script src="common.js" defer></script>
+    <script src="i18n.js" defer></script>
     <script src="launcher.js" defer></script>
-    <script srC="config.js" defer></script>
+    <script src="config.js" defer></script>
 </head>
 <body>
     <div class="main">
@@ -18,10 +19,10 @@
             <img class="titleBar-drag" data-tauri-drag-region src="assets/images/saykocraft-hd.png">
 
             <div class="windowControls">
-                <svg onclick="onMinimize()" class="icon icon-minimize" aria-label="Minimize window">
+                <svg onclick="onMinimize()" class="icon icon-minimize" aria-label="Minimize window" data-i18n-aria-label="minimizeWindow">
                     <use href="assets/icons/sprite.svg#minimize"></use>
                 </svg>
-                <svg onclick="onClose()" class="icon icon-close" aria-label="Close window">
+                <svg onclick="onClose()" class="icon icon-close" aria-label="Close window" data-i18n-aria-label="closeWindow">
                     <use href="assets/icons/sprite.svg#xmark"></use>
                 </svg>
             </div>
@@ -33,11 +34,11 @@
                         <span>SayKOCraft Earth</span>
                     </div>
                     <div style="background-image: var(--mystery-logo);" class="server unselectable">
-                        <span>Coming Soon</span>
+                        <span data-i18n="server.comingSoon">Coming Soon</span>
                     </div>
                 </div>
 
-                <svg class="icon icon-settings" aria-label="Launcher settings">
+                <svg class="icon icon-settings" aria-label="Launcher settings" data-i18n-aria-label="launcherSettings">
                     <use href="assets/icons/sprite.svg#settings"></use>
                 </svg>
                 <div id="sayko-profileicon" class="account">
@@ -51,14 +52,14 @@
                 
                     <div class="modpack-buttons">
                         <button class="button-action start">
-                            <svg class="icon icon-play" aria-label="Modpack action">
+                            <svg class="icon icon-play" aria-label="Modpack action" data-i18n-aria-label="modpackAction">
                                 <use href="assets/icons/sprite.svg#play"></use>
                             </svg>
-                            Start
+                            <span class="button-label" data-i18n="action.start">Start</span>
                         </button>
 
                         <button class="button-pack-settings warning">
-                            <svg class="icon icon-settings" aria-label="Modpack settings">
+                            <svg class="icon icon-settings" aria-label="Modpack settings" data-i18n-aria-label="modpackSettings">
                                 <use href="assets/icons/sprite.svg#settings"></use>
                             </svg>
                         </button>
@@ -66,27 +67,27 @@
                 </div>
                 <div class="centerpage centerpage-launchersettings" data-page="LAUNCHER_SETTINGS" aria-hidden="true">
                     <div class="settings-div">
-                        <span class="settings-title">Launcher Settings</span>
+                        <span class="settings-title" data-i18n="launcherSettingsTitle">Launcher Settings</span>
                         <div class="setting-div">
-                            <span class="setting-title">Installation Directory</span>
+                            <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
                             <input id="config-install_dir" type="text" class="setting-textinput">
                         </div>
                         <div class="setting-div">
-                            <span class="setting-title">Keep Launcher Open</span>
+                            <span class="setting-title" data-i18n="keepLauncherOpen">Keep Launcher Open</span>
                             <label class="switch setting-checkbox">
                                 <input id="config-keep_launcher_open" type="checkbox">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="setting-div">
-                            <span class="setting-title">Language</span>
+                            <span class="setting-title" data-i18n="language">Language</span>
                             <select name="language" id="config-language">
-                                <option value="en-US">English (US)</option>
-                                <option value="tr-TR">Türkçe</option>
+                                <option value="en-US" data-i18n="language.englishUS">English (US)</option>
+                                <option value="tr-TR" data-i18n="language.turkish">Türkçe</option>
                             </select>
                         </div>
                         <div class="logout-div">
-                            <button onclick="logout()" class="button-danger logout-button">Logout</button>
+                            <button onclick="logout()" class="button-danger logout-button" data-i18n="logout">Logout</button>
                             <span id="sayko-launcherversion" class="version-text">saykocraft-launcher</span>
                         </div>
                     </div>

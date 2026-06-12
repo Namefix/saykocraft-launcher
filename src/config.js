@@ -15,8 +15,12 @@ function registerConfigListeners() {
     })
 }
 
-async function setInitialConfigValues() {
-    let configValues = await get_config();
+async function setInitialConfigValues(configValues) {
+    if (!configValues) {
+        return;
+    }
+
+    await setLocale(configValues.language);
 
     configInputs.forEach(element => {
         for(let value in configValues) {
@@ -61,13 +65,17 @@ function inputCheckboxImpl(e) {
     invoke("update_config_field", {key, value});
 }
 
-function inputSelectImpl(e) {
+async function inputSelectImpl(e) {
     let key = e.target.id.replace("config-", "");
     let value = e.target.value;
+
+    if (key === "language") {
+        await setLocale(value);
+    }
 
     console.log(`Config value for ${key} changed to ${value}`);
     invoke("update_config_field", {key, value});
 }
 
 registerConfigListeners();
-setInitialConfigValues();
+initializeLocalization().then(setInitialConfigValues);
