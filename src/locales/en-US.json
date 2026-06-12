@@ -19,6 +19,7 @@
   "discordServer": "Discord server",
   "launcherSettingsTitle": "Launcher Settings",
   "installationDirectory": "Installation Directory",
+  "assetDirectory": "Asset Directory",
   "keepLauncherOpen": "Keep Launcher Open",
   "language": "Language",
   "language.englishUS": "English (US)",

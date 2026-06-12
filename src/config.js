@@ -1,10 +1,15 @@
 const configInputs = document.querySelectorAll('select[id^="config-"], input[id^="config-"]');
+const PATH_VALIDATION_REGEX = /^(?=.*\S)(?:[A-Za-z]:)?(?:[\\/]|[^\\/\0-\x1F<>:"|?*])+$/u;
+
+function isValidPathValue(value) {
+    return PATH_VALIDATION_REGEX.test(value);
+}
 
 function registerConfigListeners() {
     configInputs.forEach(config => {
         switch(config.localName) {
             case "input": {
-                config.addEventListener("input", config.getAttribute("type") === "checkbox" ? inputCheckboxImpl : inputDefaultImpl);
+                config.addEventListener("change", config.getAttribute("type") === "checkbox" ? inputCheckboxImpl : inputDefaultImpl);
                 break;
             }
             case "select": {
@@ -30,6 +35,7 @@ async function setInitialConfigValues(configValues) {
                     case "select":
                     {
                         element.value = configValues[value];
+                        if(element.hasAttribute("path-validate")) element.setAttribute("last-successful", configValues[value]);
                         break;
                     }
                     case "checkbox": {
@@ -53,7 +59,14 @@ function inputDefaultImpl(e) {
     let key = e.target.id.replace("config-", "");
     let value = e.target.value;
 
+    if (e.target.hasAttribute("path-validate") && !isValidPathValue(value)) {
+        console.warn(`Rejected config value for ${key}: invalid path`);
+        e.target.value = e.target.getAttribute("last-successful");
+        return;
+    }
+
     console.log(`Config value for ${key} changed to ${value}`);
+    e.target.setAttribute("last-successful", value);
     invoke("update_config_field", {key, value});
 }
 

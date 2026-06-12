@@ -19,6 +19,7 @@
   "discordServer": "Discord sunucusu",
   "launcherSettingsTitle": "Başlatıcı Ayarları",
   "installationDirectory": "Kurulum Dizini",
+  "assetDirectory": "Varlık Dizini",
   "keepLauncherOpen": "Başlatıcıyı Açık Tut",
   "language": "Dil",
   "language.englishUS": "İngilizce (ABD)",

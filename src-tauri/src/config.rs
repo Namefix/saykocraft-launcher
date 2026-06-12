@@ -8,6 +8,7 @@ const LAUNCHER_DIR_NAME: &str = ".saykocraft";
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
 	install_dir: String,
+	assets_dir: String,
 	language: String,
 	keep_launcher_open: bool,
 }
@@ -15,7 +16,8 @@ pub struct Config {
 impl Default for Config {
 	fn default() -> Self {
 		Self {
-			install_dir: "instances".to_string(),
+			install_dir: "$SAYKOCRAFT/instances".to_string(),
+			assets_dir: "$SAYKOCRAFT/assets".to_string(),
 			language: "en-US".to_string(),
 			keep_launcher_open: false,
 		}
@@ -131,25 +133,37 @@ pub fn get_config() -> Config {
 
 pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
 	let lock = CONFIG.get().ok_or_else(|| "Config not initialized".to_string())?;
-	let mut cfg = lock.write().map_err(|e| format!("rwlock poisoned: {}", e))?;
+	let updated_config = {
+		let mut cfg = lock.write().map_err(|e| format!("rwlock poisoned: {}", e))?;
 
-	match key {
-		"install_dir" => match value {
-			Value::String(s) => cfg.install_dir = s,
-			_ => return Err("install_dir must be a string".to_string()),
-		},
-		"language" => match value {
-			Value::String(s) => cfg.language = s,
-			_ => return Err("language must be a string".to_string()),
-		},
-		"keep_launcher_open" => match value {
-			Value::Bool(b) => cfg.keep_launcher_open = b,
-			_ => return Err("keep_launcher_open must be a boolean".to_string()),
-		},
-		_ => return Err(format!("Unknown config key: {}", key)),
+		match key {
+			"install_dir" => match value {
+				Value::String(s) => cfg.install_dir = s,
+				_ => return Err("install_dir must be a string".to_string()),
+			},
+			"assets_dir" => match value {
+				Value::String(s) => cfg.assets_dir = s,
+				_ => return Err("assets_dir must be a string".to_string()),
+			},
+			"language" => match value {
+				Value::String(s) => cfg.language = s,
+				_ => return Err("language must be a string".to_string()),
+			},
+			"keep_launcher_open" => match value {
+				Value::Bool(b) => cfg.keep_launcher_open = b,
+				_ => return Err("keep_launcher_open must be a boolean".to_string()),
+			},
+			_ => return Err(format!("Unknown config key: {}", key)),
+		}
+
+		cfg.clone()
+	};
+
+	if let Err(err) = save_config() {
+		error!(error = %err, "Config saving failed");
 	}
 
-	Ok(cfg.clone())
+	Ok(updated_config)
 }
 
 pub fn save_config() -> io::Result<()> {
