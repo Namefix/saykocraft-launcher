@@ -1,9 +1,14 @@
-use std::{env, fs, io, path::{Path, PathBuf}, sync::{OnceLock, RwLock}};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
 use serde_json::Value;
+use std::{
+	env, fs, io,
+	path::{Path, PathBuf},
+	sync::{OnceLock, RwLock},
+};
+use tracing::{debug, error};
 
 const LAUNCHER_DIR_NAME: &str = ".saykocraft";
+const LAUNCHER_PATH_VARIABLE: &str = "$SAYKOCRAFT";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -11,6 +16,16 @@ pub struct Config {
 	assets_dir: String,
 	language: String,
 	keep_launcher_open: bool,
+}
+
+impl Config {
+	pub fn resolved_install_dir(&self) -> io::Result<PathBuf> {
+		resolve_path(&self.install_dir)
+	}
+
+	pub fn resolved_assets_dir(&self) -> io::Result<PathBuf> {
+		resolve_path(&self.assets_dir)
+	}
 }
 
 impl Default for Config {
@@ -27,7 +42,7 @@ impl Default for Config {
 static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
 pub fn app_data_dir() -> io::Result<PathBuf> {
-    // Compiling for Windows
+	// Compiling for Windows
 	#[cfg(target_os = "windows")]
 	{
 		let appdata = env::var_os("APPDATA")
@@ -36,7 +51,7 @@ pub fn app_data_dir() -> io::Result<PathBuf> {
 		return Ok(PathBuf::from(appdata).join(LAUNCHER_DIR_NAME));
 	}
 
-    // Compiling for LUUUNIX
+	// Compiling for LUUUNIX
 	#[cfg(not(target_os = "windows"))]
 	{
 		let home = env::var_os("HOME")
@@ -52,17 +67,93 @@ pub fn ensure_data_dir() -> io::Result<()> {
 	debug!(path = %base.display(), "Ensuring launcher data directory");
 	fs::create_dir_all(&base)?;
 
-	// ensure common subdirectories
-	let instances_dir = base.join("instances");
-	debug!(path = %instances_dir.display(), "Ensuring instances directory");
-	fs::create_dir_all(&instances_dir)?;
-
 	// ensure config file
 	let config_path = base.join("config.json");
 	if !config_path.exists() {
 		write_default_config_file(&config_path)?;
 	}
 	read_config_file(&config_path)?;
+
+	let config = get_config();
+	let install_dir = config.resolved_install_dir()?;
+	debug!(path = %install_dir.display(), "Ensuring instances directory");
+	fs::create_dir_all(install_dir)?;
+
+	let assets_dir = config.resolved_assets_dir()?;
+	debug!(path = %assets_dir.display(), "Ensuring assets directory");
+	fs::create_dir_all(assets_dir)?;
+
+	Ok(())
+}
+
+pub fn resolve_path(value: &str) -> io::Result<PathBuf> {
+	let base = app_data_dir()?;
+	resolve_path_from(value, &base)
+}
+
+fn resolve_path_from(value: &str, base: &Path) -> io::Result<PathBuf> {
+	if value.trim().is_empty() {
+		return Err(invalid_path("path cannot be empty"));
+	}
+
+	if value.contains('\0') {
+		return Err(invalid_path("path cannot contain null bytes"));
+	}
+
+	if value == LAUNCHER_PATH_VARIABLE {
+		return Ok(base.to_path_buf());
+	}
+
+	if let Some(remainder) = value.strip_prefix(LAUNCHER_PATH_VARIABLE) {
+		if !remainder.starts_with(['/', '\\']) {
+			return Err(invalid_path("$SAYKOCRAFT must be followed by '/' or '\\'"));
+		}
+
+		let mut resolved = base.to_path_buf();
+		for component in remainder.split(['/', '\\']) {
+			match component {
+				"" | "." => continue,
+				".." => {
+					return Err(invalid_path("$SAYKOCRAFT paths cannot contain '..'"));
+				}
+				part => {
+					validate_launcher_component(part)?;
+					resolved.push(part);
+				}
+			}
+		}
+
+		return Ok(resolved);
+	}
+
+	if value.contains(LAUNCHER_PATH_VARIABLE) {
+		return Err(invalid_path(
+			"$SAYKOCRAFT may only appear at the beginning of a path",
+		));
+	}
+
+	let path = PathBuf::from(value);
+	if !path.is_absolute() {
+		return Err(invalid_path(
+			"path must be absolute or start with $SAYKOCRAFT",
+		));
+	}
+
+	Ok(path)
+}
+
+fn invalid_path(message: &str) -> io::Error {
+	io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+fn validate_launcher_component(component: &str) -> io::Result<()> {
+	if component.chars().any(|character| {
+		character.is_control() || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+	}) {
+		return Err(invalid_path(
+			"$SAYKOCRAFT paths contain an invalid path component",
+		));
+	}
 
 	Ok(())
 }
@@ -84,7 +175,9 @@ pub fn write_default_config_file(path: &Path) -> io::Result<()> {
 
 pub fn write_config_file(path: &Path) -> io::Result<()> {
 	let cfg_lock = CONFIG.get().expect("Config not initialized");
-	let cfg = cfg_lock.read().map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {}", e)))?;
+	let cfg = cfg_lock
+		.read()
+		.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {}", e)))?;
 	let content = serde_json::to_string_pretty(&*cfg)
 		.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("serialize error: {}", e)))?;
 
@@ -99,12 +192,29 @@ pub fn write_config_file(path: &Path) -> io::Result<()> {
 fn read_config_file(path: &Path) -> io::Result<()> {
 	if !path.exists() {
 		error!(path = %path.display(), "Config does not exist!");
-		return Ok(())
+		return Ok(());
 	}
 
 	let data = fs::read(path)?;
-	let config: Config = serde_json::from_slice(&data)
-		.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse config: {}", e)))?;
+	let config: Config = serde_json::from_slice(&data).map_err(|e| {
+		io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("failed to parse config: {}", e),
+		)
+	})?;
+
+	resolve_path(&config.install_dir).map_err(|e| {
+		io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("invalid install_dir: {}", e),
+		)
+	})?;
+	resolve_path(&config.assets_dir).map_err(|e| {
+		io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("invalid assets_dir: {}", e),
+		)
+	})?;
 
 	if let Err(_) = CONFIG.set(RwLock::new(config.clone())) {
 		if let Some(lock) = CONFIG.get() {
@@ -128,21 +238,36 @@ pub fn set_config(config: Config) -> Result<(), RwLock<Config>> {
 */
 
 pub fn get_config() -> Config {
-	CONFIG.get().expect("Config not initialized").read().expect("rwlock poisoned").clone()
+	CONFIG
+		.get()
+		.expect("Config not initialized")
+		.read()
+		.expect("rwlock poisoned")
+		.clone()
 }
 
 pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
-	let lock = CONFIG.get().ok_or_else(|| "Config not initialized".to_string())?;
+	let lock = CONFIG
+		.get()
+		.ok_or_else(|| "Config not initialized".to_string())?;
 	let updated_config = {
-		let mut cfg = lock.write().map_err(|e| format!("rwlock poisoned: {}", e))?;
+		let mut cfg = lock
+			.write()
+			.map_err(|e| format!("rwlock poisoned: {}", e))?;
 
 		match key {
 			"install_dir" => match value {
-				Value::String(s) => cfg.install_dir = s,
+				Value::String(s) => {
+					resolve_path(&s).map_err(|e| format!("invalid install_dir: {}", e))?;
+					cfg.install_dir = s;
+				}
 				_ => return Err("install_dir must be a string".to_string()),
 			},
 			"assets_dir" => match value {
-				Value::String(s) => cfg.assets_dir = s,
+				Value::String(s) => {
+					resolve_path(&s).map_err(|e| format!("invalid assets_dir: {}", e))?;
+					cfg.assets_dir = s;
+				}
 				_ => return Err("assets_dir must be a string".to_string()),
 			},
 			"language" => match value {

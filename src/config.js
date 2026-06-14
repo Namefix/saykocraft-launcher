@@ -65,16 +65,21 @@ function inputDefaultImpl(e) {
         return;
     }
 
-    console.log(`Config value for ${key} changed to ${value}`);
-    e.target.setAttribute("last-successful", value);
-    invoke("update_config_field", {key, value});
+    console.debug(`Config value for ${key} changed to ${value}`);
+    
+    invoke("update_config_field", {key, value}).then(() => {
+        e.target.setAttribute("last-successful", value);
+    }).catch(error => {
+        e.target.value = e.target.getAttribute("last-successful");
+        console.warn(`Reverting ${key} because path validation failed: ${error}`);
+    });
 }
 
 function inputCheckboxImpl(e) {
     let key = e.target.id.replace("config-", "");
     let value = e.target.checked;
 
-    console.log(`Config value for ${key} changed to ${value}`);
+    console.debug(`Config value for ${key} changed to ${value}`);
     invoke("update_config_field", {key, value});
 }
 
@@ -86,7 +91,7 @@ async function inputSelectImpl(e) {
         await setLocale(value);
     }
 
-    console.log(`Config value for ${key} changed to ${value}`);
+    console.debug(`Config value for ${key} changed to ${value}`);
     invoke("update_config_field", {key, value});
 }
 
