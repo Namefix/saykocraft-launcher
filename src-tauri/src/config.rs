@@ -238,12 +238,7 @@ pub fn set_config(config: Config) -> Result<(), RwLock<Config>> {
 */
 
 pub fn get_config() -> Config {
-	CONFIG
-		.get()
-		.expect("Config not initialized")
-		.read()
-		.expect("rwlock poisoned")
-		.clone()
+	CONFIG.get().expect("Config not initialized").read().expect("rwlock poisoned").clone()
 }
 
 pub fn update_field(key: &str, value: Value) -> Result<Config, String> {

@@ -1,6 +1,7 @@
 mod auth;
 mod profile_icon;
 mod config;
+mod instance;
 
 use keyring_core::{Entry, Error as KeyringError};
 use tauri::{AppHandle, Emitter, LogicalSize, RunEvent, Size};
@@ -202,6 +203,8 @@ fn init_tracing() -> WorkerGuard {
 pub fn run() {
     let _log_guard = init_tracing();
 
+    info!("Starting SayKOCraft Launcher");
+
     if let Err(e) = keyring::use_native_store(true) {
         error!("Failed to initialize keyring store: {e}");
     }
@@ -210,7 +213,9 @@ pub fn run() {
         error!("Failed to ensure data directory: {e}");
     }
 
-    info!("Starting SayKOCraft Launcher");
+    if let Err(error) = instance::scan_local_instances() {
+        error!(%error, "Failed to scan local instances");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new()
@@ -252,4 +257,3 @@ pub fn run() {
             _ => {}
         });
 }
-
