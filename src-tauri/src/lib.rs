@@ -185,6 +185,13 @@ async fn get_instance_state(id: String) -> u8 {
     instance::get_instance_state(&id) as u8
 }
 
+#[tauri::command]
+async fn fetch_remote_instance(id: String) -> Result<(), String> {
+    instance::fetch_remote_instance(&id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 fn init_tracing() -> WorkerGuard {
     let file_appender = rolling::daily("./logs", "launcher.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -256,6 +263,7 @@ pub fn run() {
             save_config,
             update_config_field,
             get_instance_state,
+            fetch_remote_instance,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

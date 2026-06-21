@@ -256,6 +256,22 @@ fn read_instance_manifest(path: &Path) -> io::Result<InstanceManifest> {
     })
 }
 
+fn write_instance_manifest(path: &Path, instance: &InstanceManifest) -> io::Result<()> {
+    let content = serde_json::to_string_pretty(instance).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to serialize instance manifest: {error}"),
+        )
+    })?;
+
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, path)?;
+    debug!(path = %path.display(), "Written instance manifest");
+
+    Ok(())
+}
+
 fn read_packfile_manifest(path: &Path) -> io::Result<PackFileManifest> {
     let data = fs::read(path)?;
     serde_json::from_slice::<PackFileManifest>(&data).map_err(|error| {
@@ -409,11 +425,39 @@ pub fn get_instance_state(id: &str) -> InstanceState {
     let instances = get_instances();
     
     match instances.iter().find(|&x| x.id == id) {
-        Some(i) => {
-            i.state.clone()
-        }
-        None => {
-            InstanceState::Unknown
-        }
+        Some(i) => i.state.clone(),
+        None => InstanceState::Unknown,
     }
+}
+
+fn remote_instance_error_to_io(error: RemoteInstanceError) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, error)
+}
+
+pub async fn fetch_remote_instance(instance_id: &str) -> io::Result<()> {
+    let install_dir = crate::config::get_config().resolved_install_dir()?;
+
+    let instance = get_remote_instance(instance_id)
+        .await
+        .map_err(remote_instance_error_to_io)?;
+    let instance_dir = install_dir.join(&instance.id);
+    let manifest_path = instance_dir.join(INSTANCE_MANIFEST_FILE);
+
+    fs::create_dir_all(&instance_dir)?;
+    write_instance_manifest(&manifest_path, &instance)?;
+    validate_instance_manifest(&instance_dir, &instance)?;
+
+    info!(id = %instance.id, version = %instance.pack_version, "Fetched remote instance manifest");
+
+    let mut instances = read_local_instances()?;
+
+    if let Some(local_instance) = instances.iter_mut().find(|entry| entry.id == instance.id) {
+        local_instance.state = determine_instance_state(
+            &instance.id,
+            &instance,
+            local_instance.instance_manifest.as_ref(),
+        );
+    }
+
+    replace_instances(instances)
 }

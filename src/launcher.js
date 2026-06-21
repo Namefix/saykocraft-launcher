@@ -97,9 +97,6 @@ async function setModpackButton() {
     modpackActionButton.classList.remove("update");
     modpackActionButton.classList.remove("download");
 
-    console.log(Object.keys(InstanceState))
-    console.log(Object.keys(InstanceState)[buttonState])
-
     switch(Object.values(InstanceState)[buttonState]) {
         case InstanceState.Unknown:
         case InstanceState.Broken: {
