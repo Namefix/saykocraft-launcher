@@ -1,11 +1,15 @@
-use std::{fs, io::Cursor, path::{Path, PathBuf}};
+use std::{
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+};
 
-use image::{ImageFormat, ImageReader, imageops};
-use reqwest::{Client, StatusCode, header};
+use base64::Engine as _;
+use image::{imageops, ImageFormat, ImageReader};
+use reqwest::{header, Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use base64::Engine as _;
-use tauri::{AppHandle, Manager, path::BaseDirectory};
+use tauri::{path::BaseDirectory, AppHandle, Manager};
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -111,7 +115,10 @@ async fn fetch_skin_url(username: &str) -> Result<String, StatusCode> {
     let client = Client::new();
 
     let response_id = client
-        .get(format!("https://api.minecraftservices.com/minecraft/profile/lookup/name/{}", username))
+        .get(format!(
+            "https://api.minecraftservices.com/minecraft/profile/lookup/name/{}",
+            username
+        ))
         .send()
         .await
         .map_err(|e| {
@@ -121,7 +128,7 @@ async fn fetch_skin_url(username: &str) -> Result<String, StatusCode> {
 
     if !response_id.status().is_success() {
         error!(response = %response_id.status(), "Error retrieving UUID");
-        return Err(response_id.status())
+        return Err(response_id.status());
     }
 
     let player_uuid = response_id.json::<IdResponse>().await.map_err(|e| {
@@ -130,7 +137,10 @@ async fn fetch_skin_url(username: &str) -> Result<String, StatusCode> {
     })?;
 
     let response_profile = client
-        .get(format!("https://sessionserver.mojang.com/session/minecraft/profile/{}", &player_uuid.id))
+        .get(format!(
+            "https://sessionserver.mojang.com/session/minecraft/profile/{}",
+            &player_uuid.id
+        ))
         .send()
         .await
         .map_err(|e| {
@@ -140,13 +150,16 @@ async fn fetch_skin_url(username: &str) -> Result<String, StatusCode> {
 
     if !response_profile.status().is_success() {
         error!(response = %response_profile.status(), "Error retrieving profile");
-        return Err(response_profile.status())
+        return Err(response_profile.status());
     }
 
-    let player_profile = response_profile.json::<ProfileResponse>().await.map_err(|e| {
-        error!(error = %e, "Error parsing profile");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let player_profile = response_profile
+        .json::<ProfileResponse>()
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Error parsing profile");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let textures_property = player_profile
         .properties
@@ -164,10 +177,11 @@ async fn fetch_skin_url(username: &str) -> Result<String, StatusCode> {
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let textures_payload: TexturesPayload = serde_json::from_slice(&decoded_textures).map_err(|e| {
-        error!(error = %e, "Error parsing textures JSON");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let textures_payload: TexturesPayload =
+        serde_json::from_slice(&decoded_textures).map_err(|e| {
+            error!(error = %e, "Error parsing textures JSON");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let skin_url = textures_payload
         .textures
@@ -245,21 +259,17 @@ pub async fn get_profile_icon(app: &AppHandle, username: &str) -> Result<String,
     }
 
     let response_skin = if response_skin.status() == StatusCode::NOT_MODIFIED {
-        client
-            .get(&skin_url)
-            .send()
-            .await
-            .map_err(|e| {
-                error!(error = %e, "Error retrieving skin image");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
+        client.get(&skin_url).send().await.map_err(|e| {
+            error!(error = %e, "Error retrieving skin image");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
     } else {
         response_skin
     };
 
     if !response_skin.status().is_success() {
         error!(response = %response_skin.status(), "Error retrieving skin image");
-        return Err(response_skin.status())
+        return Err(response_skin.status());
     }
 
     let etag = response_skin
@@ -279,10 +289,13 @@ pub async fn get_profile_icon(app: &AppHandle, username: &str) -> Result<String,
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    write_cache_meta(&meta_path, &IconCacheMeta {
-        etag,
-        skin_url: Some(skin_url),
-    })?;
+    write_cache_meta(
+        &meta_path,
+        &IconCacheMeta {
+            etag,
+            skin_url: Some(skin_url),
+        },
+    )?;
 
     Ok(png_to_data_url(&png_bytes))
 }

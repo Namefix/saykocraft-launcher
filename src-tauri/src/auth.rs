@@ -1,6 +1,6 @@
 use keyring_core::{Entry, Error as KeyringError};
-use serde::{Deserialize, Serialize};
 use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::error;
@@ -17,7 +17,7 @@ pub enum AuthError {
     UpgradeRequired,
     Client(u16),
     Server(u16),
-    InvalidResponse(String)
+    InvalidResponse(String),
 }
 
 #[derive(Serialize)]
@@ -63,30 +63,27 @@ fn is_network_error(err: &reqwest::Error) -> bool {
 struct LoginRequest {
     username: String,
     password: String,
-    version: String
+    version: String,
 }
 
 #[derive(Debug, Serialize)]
 struct ExtendRequest {
     token: String,
-    version: String
+    version: String,
 }
 
 #[derive(Debug, Serialize)]
 struct LogoutRequest {
-    token: String
+    token: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoginResponse {
     pub username: String,
-    pub token: String
+    pub token: String,
 }
 
-pub async fn authenticate(
-    username: &str,
-    password: &str
-) -> Result<LoginResponse, AuthError> {
+pub async fn authenticate(username: &str, password: &str) -> Result<LoginResponse, AuthError> {
     let client = Client::new();
 
     let response = client
@@ -94,7 +91,7 @@ pub async fn authenticate(
         .json(&LoginRequest {
             username: username.to_string(),
             password: password.to_string(),
-            version: crate::VERSION.to_string()
+            version: crate::VERSION.to_string(),
         })
         .send()
         .await
@@ -102,7 +99,7 @@ pub async fn authenticate(
 
     if !response.status().is_success() {
         error!(response = %response.status(), "Auth failed");
-        return Err(map_auth_status(response.status()))
+        return Err(map_auth_status(response.status()));
     }
 
     response
@@ -111,15 +108,16 @@ pub async fn authenticate(
         .map_err(|e| AuthError::InvalidResponse(e.to_string()))
 }
 
-pub async fn extend_session(
-    token: &String
-) -> Result<bool, AuthError> {
+pub async fn extend_session(token: &String) -> Result<bool, AuthError> {
     let client = Client::new();
 
     for attempt in 1..=3 {
         let response = client
             .post(format!("{}/extend", AUTH_URL))
-            .json(&ExtendRequest { token: token.to_string(), version: crate::VERSION.to_string() })
+            .json(&ExtendRequest {
+                token: token.to_string(),
+                version: crate::VERSION.to_string(),
+            })
             .send()
             .await;
 
@@ -149,17 +147,19 @@ pub async fn extend_session(
         }
     }
 
-    Err(AuthError::Network("Network error: request retries exhausted".to_string()))
+    Err(AuthError::Network(
+        "Network error: request retries exhausted".to_string(),
+    ))
 }
 
-pub async fn logout_session(
-    token: &String
-) -> StatusCode {
+pub async fn logout_session(token: &String) -> StatusCode {
     let client = Client::new();
 
     match client
         .post(format!("{}/logout", AUTH_URL))
-        .json(&LogoutRequest { token: token.to_string() })
+        .json(&LogoutRequest {
+            token: token.to_string(),
+        })
         .send()
         .await
     {
@@ -186,37 +186,27 @@ pub async fn login(username: String, password: String) -> Result<String, LoginEr
                 "RATE_LIMITED",
                 "Too many requests. Please wait and try again.",
             ),
-            AuthError::Unauthorized => LoginError::new(
-                "INVALID_CREDENTIALS",
-                "Invalid username or password.",
-            ),
+            AuthError::Unauthorized => {
+                LoginError::new("INVALID_CREDENTIALS", "Invalid username or password.")
+            }
             AuthError::UpgradeRequired => LoginError::new(
                 "UPGRADE_REQUIRED",
-                "Launcher is outdated. Please update to the latest version."
+                "Launcher is outdated. Please update to the latest version.",
             ),
-            AuthError::Client(status) => LoginError::new(
-                "AUTH_FAILED",
-                format!("Auth failed: {}", status),
-            ),
-            AuthError::Server(status) => LoginError::new(
-                "SERVER_ERROR",
-                format!("Server error: {}", status),
-            ),
-            AuthError::Network(message) => LoginError::new(
-                "NETWORK_ERROR",
-                message,
-            ),
-            AuthError::InvalidResponse(message) => LoginError::new(
-                "BAD_RESPONSE",
-                message,
-            ),
+            AuthError::Client(status) => {
+                LoginError::new("AUTH_FAILED", format!("Auth failed: {}", status))
+            }
+            AuthError::Server(status) => {
+                LoginError::new("SERVER_ERROR", format!("Server error: {}", status))
+            }
+            AuthError::Network(message) => LoginError::new("NETWORK_ERROR", message),
+            AuthError::InvalidResponse(message) => LoginError::new("BAD_RESPONSE", message),
         })?;
 
-    let token_entry = Entry::new("saykocraft-launcher", "session")
-        .map_err(|e| LoginError {
-            code: "KEYRING_ACCESS".to_string(),
-            message: format!("Couldn't access keyring: {}", e),
-        })?;
+    let token_entry = Entry::new("saykocraft-launcher", "session").map_err(|e| LoginError {
+        code: "KEYRING_ACCESS".to_string(),
+        message: format!("Couldn't access keyring: {}", e),
+    })?;
 
     token_entry
         .set_password(&response.token)
@@ -225,12 +215,11 @@ pub async fn login(username: String, password: String) -> Result<String, LoginEr
             message: format!("Couldn't save token: {}", e),
         })?;
 
-    let username_entry = Entry::new("saykocraft-launcher", "username")
-        .map_err(|e| LoginError {
-            code: "KEYRING_ACCESS".to_string(),
-            message: format!("Couldn't access keyring: {}", e),
-        })?;
-    
+    let username_entry = Entry::new("saykocraft-launcher", "username").map_err(|e| LoginError {
+        code: "KEYRING_ACCESS".to_string(),
+        message: format!("Couldn't access keyring: {}", e),
+    })?;
+
     username_entry
         .set_password(&response.username)
         .map_err(|e| LoginError {
