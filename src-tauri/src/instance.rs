@@ -282,6 +282,92 @@ fn read_packfile_manifest(path: &Path) -> io::Result<PackFileManifest> {
     })
 }
 
+pub async fn fetch_pack_file_manifest(instance: &InstanceManifest) -> io::Result<PackFileManifest> {
+    let client = Client::builder()
+        .timeout(REMOTE_INSTANCE_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| {
+            error!(%error, "Error creating pack file manifest client");
+            io::Error::new(io::ErrorKind::Other, error)
+        })?;
+    let url = &instance.file_manifest.url;
+
+    let response = client.get(url).send().await.map_err(|error| {
+        error!(%url, %error, "Error retrieving pack file manifest");
+        io::Error::new(io::ErrorKind::Other, error)
+    })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        error!(%url, %status, "Pack file manifest request failed");
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("pack file manifest request failed with status {status}"),
+        ));
+    }
+
+    let data = response.bytes().await.map_err(|error| {
+        error!(%url, %error, "Error reading pack file manifest response");
+        io::Error::new(io::ErrorKind::Other, error)
+    })?;
+
+    if !crate::utils::sha256_matches(data.as_ref(), &instance.file_manifest.sha256) {
+        error!(
+            %url,
+            expected_sha256 = %instance.file_manifest.sha256,
+            "Pack file manifest checksum mismatch"
+        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "pack file manifest checksum mismatch",
+        ));
+    }
+
+    let pack_file_manifest =
+        serde_json::from_slice::<PackFileManifest>(data.as_ref()).map_err(|error| {
+            error!(%url, %error, "Error parsing pack file manifest");
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to parse pack file manifest: {error}"),
+            )
+        })?;
+
+    validate_pack_file_manifest(instance, &pack_file_manifest).map_err(|error| {
+        error!(%url, instance_id = %instance.id, %error, "Pack file manifest failed validation");
+        io::Error::new(io::ErrorKind::InvalidData, error)
+    })?;
+
+    Ok(pack_file_manifest)
+}
+
+fn validate_pack_file_manifest(
+    instance: &InstanceManifest,
+    pack_file_manifest: &PackFileManifest,
+) -> Result<(), String> {
+    if pack_file_manifest.schema_version != SUPPORTED_INSTANCE_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported pack file manifest schema version: {}",
+            pack_file_manifest.schema_version,
+        ));
+    }
+
+    if pack_file_manifest.instance_id != instance.id {
+        return Err(format!(
+            "pack file manifest instance id '{}' does not match instance id '{}'",
+            pack_file_manifest.instance_id, instance.id,
+        ));
+    }
+
+    if pack_file_manifest.pack_version != instance.pack_version {
+        return Err(format!(
+            "pack file manifest version '{}' does not match instance version '{}'",
+            pack_file_manifest.pack_version, instance.pack_version,
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn get_instances() -> Vec<InstanceEntry> {
     INSTANCES
         .get_or_init(|| RwLock::new(Vec::new()))

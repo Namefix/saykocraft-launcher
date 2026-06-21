@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 
 fn parse_semver(version: &str) -> Option<(u64, u64, u64, Option<&str>)> {
@@ -60,4 +61,13 @@ pub fn compare_semver(left: &str, right: &str) -> Option<Ordering> {
                 }
             }),
     )
+}
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    hex::encode(digest)
+}
+
+pub fn sha256_matches(bytes: &[u8], expected: &str) -> bool {
+    sha256_hex(bytes).eq_ignore_ascii_case(expected)
 }

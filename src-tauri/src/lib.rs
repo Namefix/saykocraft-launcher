@@ -3,6 +3,7 @@ mod config;
 mod instance;
 mod profile_icon;
 mod utils;
+mod minecraft;
 
 use keyring_core::{Entry, Error as KeyringError};
 use serde_json::Value;
