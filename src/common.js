@@ -2,6 +2,15 @@ const { invoke } = window.__TAURI__.core;
 const { openUrl } = window.__TAURI__.opener;
 const { listen } = window.__TAURI__.event;
 
+const InstanceState = Object.freeze({
+    Unknown: 0,
+    NotInstalled: 1,
+    RequiresUpdate: 2,
+    Ready: 3,
+    Launched: 4,
+    Broken: 5
+});
+
 function onClose(e) {
     e?.stopPropagation();
     invoke("window_close");

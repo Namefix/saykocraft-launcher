@@ -29,6 +29,7 @@
   "action.stop": "Durdur",
   "action.download": "İndir",
   "action.update": "Güncelle",
+  "action.broken": "Bozuk",
   "server.comingSoon": "Yakında",
   "launcherSettings": "Başlatıcı ayarları",
   "modpackSettings": "Mod paket ayarları",

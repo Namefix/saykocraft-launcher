@@ -180,6 +180,11 @@ async fn update_config_field(key: String, value: Value) -> Result<config::Config
     config::update_field(&key, value).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_instance_state(id: String) -> u8 {
+    instance::get_instance_state(&id) as u8
+}
+
 fn init_tracing() -> WorkerGuard {
     let file_appender = rolling::daily("./logs", "launcher.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -249,7 +254,8 @@ pub fn run() {
             set_login_window,
             get_config,
             save_config,
-            update_config_field
+            update_config_field,
+            get_instance_state,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

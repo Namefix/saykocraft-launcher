@@ -29,6 +29,7 @@
   "action.stop": "Stop",
   "action.download": "Download",
   "action.update": "Update",
+  "action.broken": "Broken",
   "server.comingSoon": "Coming Soon",
   "launcherSettings": "Launcher settings",
   "modpackSettings": "Modpack settings",

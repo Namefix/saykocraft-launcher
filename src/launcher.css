@@ -218,13 +218,33 @@ body {
     transition: border-radius 0.1s;
 }
 
-.centerDiv .button-action:hover {
+.centerDiv .button-action:hover:not(.disabled) {
     opacity: 0.8;
 }
 
 .button-action.start {
     border-color: var(--button-start-border);
     background-color: var(--button-start-background);
+}
+
+.button-action.stop {
+    border-color: var(--button-stop-border);
+    background-color: var(--button-stop-background);
+}
+
+.button-action.update {
+    border-color: var(--button-update-border);
+    background-color: var(--button-update-background);
+}
+
+.button-action.download {
+    border-color: var(--button-download-border);
+    background-color: var(--button-download-background);
+}
+
+.button-action.disabled {
+    opacity: 0.7;
+    cursor: not-allowed !important;
 }
 
 .button-action .icon-play {

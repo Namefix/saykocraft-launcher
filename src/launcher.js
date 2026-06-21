@@ -5,6 +5,9 @@ const launcherSettingsButton = document.querySelector(".sideBar .icon-settings")
 const serverButtons = document.querySelectorAll(".serverlist .server");
 let lastSelectedServer = document.querySelector(".serverlist .server.selected") || null;
 
+const modpackActionButton = document.getElementById("modpack-actionbutton");
+const modpackActionButtonLabel = document.getElementById("modpack-actionbutton-label");
+
 const launcherSettingsVersionText = document.getElementById("sayko-launcherversion");
 
 const LauncherView = Object.freeze({
@@ -12,8 +15,6 @@ const LauncherView = Object.freeze({
     LAUNCHER_SETTINGS: "LAUNCHER_SETTINGS",
     MODPACK_SETTINGS: "MODPACK_SETTINGS"
 });
-
-initializeLocalization();
 
 launcherSettingsButton?.addEventListener("click", () => {
     setLauncherView(LauncherView.LAUNCHER_SETTINGS);
@@ -87,7 +88,57 @@ async function setLauncherVersion() {
     let version = await invoke("get_launcher_version");
     launcherSettingsVersionText.textContent = `saykocraft-launcher v${version}`
 }
-setUsername();
-setProfileIcon();
-setLauncherVersion();
-setLauncherView(LauncherView.MAIN);
+async function setModpackButton() {
+    let buttonState = await invoke("get_instance_state", {id:"saykocraft-earth"});
+
+    modpackActionButton.classList.remove("disabled");
+    modpackActionButton.classList.remove("start");
+    modpackActionButton.classList.remove("stop");
+    modpackActionButton.classList.remove("update");
+    modpackActionButton.classList.remove("download");
+
+    console.log(Object.keys(InstanceState))
+    console.log(Object.keys(InstanceState)[buttonState])
+
+    switch(Object.values(InstanceState)[buttonState]) {
+        case InstanceState.Unknown:
+        case InstanceState.Broken: {
+            modpackActionButton.classList.add("disabled");
+            modpackActionButtonLabel.textContent = t("action.broken");
+            break;
+        }
+        case InstanceState.RequiresUpdate: {
+            modpackActionButton.classList.add("update");
+            modpackActionButtonLabel.textContent = t("action.update");
+            console.log(t("action.update"))
+            break;
+        }
+        case InstanceState.Ready: {
+            modpackActionButton.classList.add("start");
+            modpackActionButtonLabel.textContent = t("action.start");
+            break;
+        }
+        case InstanceState.Launched: {
+            modpackActionButton.classList.add("stop");
+            modpackActionButtonLabel.textContent = t("action.stop");
+            break;
+        }
+        case InstanceState.NotInstalled: {
+            modpackActionButton.classList.add("download");
+            modpackActionButtonLabel.textContent = t("action.download");
+            break;
+        }
+    }
+}
+
+async function initializeLauncher() {
+    await initializeLocalization();
+
+    setUsername();
+    setProfileIcon();
+    setLauncherVersion();
+    setLauncherView(LauncherView.MAIN);
+    setModpackButton();
+}
+
+initializeLauncher().catch(console.error);
