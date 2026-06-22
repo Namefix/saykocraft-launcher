@@ -509,7 +509,7 @@ fn determine_instance_state(
 
 pub fn get_instance_state(id: &str) -> InstanceState {
     let instances = get_instances();
-    
+
     match instances.iter().find(|&x| x.id == id) {
         Some(i) => i.state.clone(),
         None => InstanceState::Unknown,

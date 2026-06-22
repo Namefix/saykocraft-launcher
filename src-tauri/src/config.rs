@@ -13,7 +13,7 @@ const LAUNCHER_PATH_VARIABLE: &str = "$SAYKOCRAFT";
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     install_dir: String,
-    assets_dir: String,
+    data_dir: String,
     language: String,
     keep_launcher_open: bool,
 }
@@ -23,8 +23,8 @@ impl Config {
         resolve_path(&self.install_dir)
     }
 
-    pub fn resolved_assets_dir(&self) -> io::Result<PathBuf> {
-        resolve_path(&self.assets_dir)
+    pub fn resolved_data_dir(&self) -> io::Result<PathBuf> {
+        resolve_path(&self.data_dir)
     }
 }
 
@@ -32,7 +32,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             install_dir: "$SAYKOCRAFT/instances".to_string(),
-            assets_dir: "$SAYKOCRAFT/assets".to_string(),
+            data_dir: "$SAYKOCRAFT/data".to_string(),
             language: "en-US".to_string(),
             keep_launcher_open: false,
         }
@@ -61,7 +61,7 @@ pub fn app_data_dir() -> io::Result<PathBuf> {
     }
 }
 
-pub fn ensure_data_dir() -> io::Result<()> {
+pub fn ensure_base_dir() -> io::Result<()> {
     // ensure base launcher dir
     let base = app_data_dir()?;
     debug!(path = %base.display(), "Ensuring launcher data directory");
@@ -79,9 +79,9 @@ pub fn ensure_data_dir() -> io::Result<()> {
     debug!(path = %install_dir.display(), "Ensuring instances directory");
     fs::create_dir_all(install_dir)?;
 
-    let assets_dir = config.resolved_assets_dir()?;
-    debug!(path = %assets_dir.display(), "Ensuring assets directory");
-    fs::create_dir_all(assets_dir)?;
+    let data_dir = config.resolved_data_dir()?;
+    debug!(path = %data_dir.display(), "Ensuring data directory");
+    fs::create_dir_all(data_dir)?;
 
     Ok(())
 }
@@ -209,10 +209,10 @@ fn read_config_file(path: &Path) -> io::Result<()> {
             format!("invalid install_dir: {}", e),
         )
     })?;
-    resolve_path(&config.assets_dir).map_err(|e| {
+    resolve_path(&config.data_dir).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("invalid assets_dir: {}", e),
+            format!("invalid data_dir: {}", e),
         )
     })?;
 
@@ -263,12 +263,12 @@ pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
                 }
                 _ => return Err("install_dir must be a string".to_string()),
             },
-            "assets_dir" => match value {
+            "data_dir" => match value {
                 Value::String(s) => {
-                    resolve_path(&s).map_err(|e| format!("invalid assets_dir: {}", e))?;
-                    cfg.assets_dir = s;
+                    resolve_path(&s).map_err(|e| format!("invalid data_dir: {}", e))?;
+                    cfg.data_dir = s;
                 }
-                _ => return Err("assets_dir must be a string".to_string()),
+                _ => return Err("data_dir must be a string".to_string()),
             },
             "language" => match value {
                 Value::String(s) => cfg.language = s,

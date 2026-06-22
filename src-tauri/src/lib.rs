@@ -1,9 +1,9 @@
 mod auth;
 mod config;
 mod instance;
+mod minecraft;
 mod profile_icon;
 mod utils;
-mod minecraft;
 
 use keyring_core::{Entry, Error as KeyringError};
 use serde_json::Value;
@@ -225,12 +225,18 @@ pub fn run() {
         error!("Failed to initialize keyring store: {e}");
     }
 
-    if let Err(e) = config::ensure_data_dir() {
+    if let Err(e) = config::ensure_base_dir() {
         error!("Failed to ensure data directory: {e}");
     }
 
     if let Err(error) = tauri::async_runtime::block_on(instance::init_instances()) {
         error!(%error, "Failed to initialize instances");
+    }
+
+    if let Err(error) =
+        tauri::async_runtime::block_on(minecraft::install::ensure_minecraft_installation("1.21.1"))
+    {
+        error!(%error, "Failed to ensure Minecraft installation");
     }
 
     tauri::Builder::default()
