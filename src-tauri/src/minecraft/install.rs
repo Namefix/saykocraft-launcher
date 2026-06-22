@@ -9,7 +9,9 @@ use reqwest::Client;
 use serde::Deserialize;
 use tracing::{debug, info};
 
-use super::MinecraftInstallError;
+use super::{
+    InstallPhase, InstallProgress, InstallProgressSink, MinecraftInstallError, NoopProgressSink,
+};
 
 const VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -93,6 +95,18 @@ struct RuleOs {
 }
 
 pub async fn ensure_minecraft_installation(version: &str) -> Result<(), MinecraftInstallError> {
+    let progress = NoopProgressSink;
+    ensure_minecraft_installation_with_progress("minecraft", version, &progress).await
+}
+
+pub async fn ensure_minecraft_installation_with_progress<S>(
+    instance_id: &str,
+    version: &str,
+    progress: &S,
+) -> Result<(), MinecraftInstallError>
+where
+    S: InstallProgressSink + ?Sized,
+{
     info!(%version, "Ensuring minecraft installation for version");
     if version.trim().is_empty() {
         return Err(MinecraftInstallError::Validation(
@@ -100,12 +114,41 @@ pub async fn ensure_minecraft_installation(version: &str) -> Result<(), Minecraf
         ));
     }
 
+    emit_progress(
+        progress,
+        instance_id,
+        InstallPhase::Preparing,
+        "Preparing Minecraft installation",
+        0,
+        0,
+        None,
+    );
     ensure_installation_app_dir().await?;
 
     let client = Client::new();
+    emit_progress(
+        progress,
+        instance_id,
+        InstallPhase::MinecraftManifest,
+        "Fetching Minecraft metadata",
+        0,
+        0,
+        None,
+    );
     let version_details = fetch_version_details(&client, version).await?;
-    ensure_client_jar(&client, &version_details).await?;
-    info!(version = %version_details.id, "Minecraft client jar is installed");
+    ensure_client_jar(&client, &version_details, instance_id, progress).await?;
+    ensure_libraries(&client, &version_details, instance_id, progress).await?;
+
+    emit_progress(
+        progress,
+        instance_id,
+        InstallPhase::Done,
+        "Minecraft installation ready",
+        0,
+        0,
+        None,
+    );
+    info!(version = %version_details.id, "Minecraft installation is ready");
 
     Ok(())
 }
@@ -175,6 +218,8 @@ async fn fetch_version_details(
 async fn ensure_client_jar(
     client: &Client,
     version_details: &VersionDetails,
+    instance_id: &str,
+    progress: &(impl InstallProgressSink + ?Sized),
 ) -> Result<(), MinecraftInstallError> {
     let versions_dir = crate::config::get_config()
         .resolved_data_dir()?
@@ -189,8 +234,64 @@ async fn ensure_client_jar(
         &jar_path,
         client_download.size,
         &client_download.sha1,
+        DownloadProgress {
+            instance_id,
+            phase: InstallPhase::MinecraftClient,
+            label: format!("Downloading Minecraft {}", version_details.id),
+            current_file: jar_path.display().to_string(),
+        },
+        progress,
     )
     .await
+}
+
+async fn ensure_libraries(
+    client: &Client,
+    version_details: &VersionDetails,
+    instance_id: &str,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    let libraries_dir = crate::config::get_config()
+        .resolved_data_dir()?
+        .join("libraries");
+
+    for library in version_details
+        .libraries
+        .iter()
+        .filter(|library| library_is_allowed(library))
+    {
+        let Some(downloads) = &library.downloads else {
+            continue;
+        };
+        let Some(artifact) = &downloads.artifact else {
+            continue;
+        };
+        let Some(artifact_path) = &artifact.path else {
+            return Err(MinecraftInstallError::MissingDownload {
+                version: version_details.id.clone(),
+                artifact: library.name.clone(),
+            });
+        };
+
+        let destination = libraries_dir.join(artifact_path);
+        download_verified_file(
+            client,
+            &artifact.url,
+            &destination,
+            artifact.size,
+            &artifact.sha1,
+            DownloadProgress {
+                instance_id,
+                phase: InstallPhase::MinecraftLibraries,
+                label: format!("Downloading Minecraft library {}", library.name),
+                current_file: artifact_path.clone(),
+            },
+            progress,
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn download_verified_file(
@@ -199,15 +300,36 @@ async fn download_verified_file(
     destination: &Path,
     expected_size: u64,
     expected_sha1: &str,
+    progress_info: DownloadProgress<'_>,
+    progress: &(impl InstallProgressSink + ?Sized),
 ) -> Result<(), MinecraftInstallError> {
     if is_existing_file_valid(destination, expected_size, expected_sha1)? {
         debug!(path = %destination.display(), "Skipping already valid Minecraft download");
+        emit_progress(
+            progress,
+            progress_info.instance_id,
+            progress_info.phase,
+            &progress_info.label,
+            expected_size,
+            expected_size,
+            Some(progress_info.current_file.clone()),
+        );
         return Ok(());
     }
 
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
+
+    emit_progress(
+        progress,
+        progress_info.instance_id,
+        progress_info.phase.clone(),
+        &progress_info.label,
+        0,
+        expected_size,
+        Some(progress_info.current_file.clone()),
+    );
 
     let response = client.get(url).send().await?;
     let status = response.status();
@@ -245,6 +367,15 @@ async fn download_verified_file(
     }
     fs::rename(&partial_destination, destination)?;
 
+    emit_progress(
+        progress,
+        progress_info.instance_id,
+        progress_info.phase,
+        &progress_info.label,
+        expected_size,
+        expected_size,
+        Some(progress_info.current_file),
+    );
     info!(path = %destination.display(), "Downloaded Minecraft file");
     Ok(())
 }
@@ -272,4 +403,84 @@ fn partial_path(path: &Path) -> PathBuf {
     let mut partial = OsString::from(path.as_os_str());
     partial.push(".part");
     PathBuf::from(partial)
+}
+
+fn library_is_allowed(library: &Library) -> bool {
+    evaluate_rules(library.rules.as_deref())
+}
+
+fn evaluate_rules(rules: Option<&[Rule]>) -> bool {
+    let Some(rules) = rules else {
+        return true;
+    };
+
+    let mut allowed = false;
+    for rule in rules {
+        if rule_matches(rule) {
+            allowed = matches!(rule.action, RuleAction::Allow);
+        }
+    }
+
+    allowed
+}
+
+fn rule_matches(rule: &Rule) -> bool {
+    rule.os.as_ref().map_or(true, os_rule_matches)
+        && rule
+            .features
+            .as_ref()
+            .map_or(true, |features| features.is_empty())
+}
+
+fn os_rule_matches(os: &RuleOs) -> bool {
+    os.name
+        .as_ref()
+        .map_or(true, |name| name == current_minecraft_os_name())
+        && os
+            .arch
+            .as_ref()
+            .map_or(true, |arch| arch == current_minecraft_arch())
+}
+
+fn current_minecraft_os_name() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "osx",
+        "windows" => "windows",
+        "linux" => "linux",
+        other => other,
+    }
+}
+
+fn current_minecraft_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86" | "i386" | "i586" | "i686" => "x86",
+        "x86_64" | "amd64" => "x86_64",
+        other => other,
+    }
+}
+
+struct DownloadProgress<'a> {
+    instance_id: &'a str,
+    phase: InstallPhase,
+    label: String,
+    current_file: String,
+}
+
+fn emit_progress(
+    sink: &(impl InstallProgressSink + ?Sized),
+    instance_id: &str,
+    phase: InstallPhase,
+    current_label: impl Into<String>,
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    current_file: Option<String>,
+) {
+    sink.emit(InstallProgress {
+        instance_id: instance_id.to_string(),
+        phase,
+        current_label: current_label.into(),
+        downloaded_bytes,
+        total_bytes,
+        current_file,
+    });
 }
