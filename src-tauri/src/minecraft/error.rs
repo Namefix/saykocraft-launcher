@@ -22,6 +22,7 @@ pub enum MinecraftInstallError {
         expected: String,
         actual: String,
     },
+    Archive(String),
     UnsupportedPlatform(String),
 }
 
@@ -60,6 +61,9 @@ impl fmt::Display for MinecraftInstallError {
                 f,
                 "Minecraft download checksum mismatch for {path}: expected {expected}, got {actual}"
             ),
+            Self::Archive(message) => {
+                write!(f, "Minecraft archive extraction failed: {message}")
+            }
             Self::UnsupportedPlatform(message) => {
                 write!(f, "unsupported Minecraft install platform: {message}")
             }

@@ -8,6 +8,7 @@ use std::{
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::{debug, info};
+use zip::ZipArchive;
 
 use super::{
     InstallPhase, InstallProgress, InstallProgressSink, MinecraftInstallError, NoopProgressSink,
@@ -77,12 +78,18 @@ struct Library {
     downloads: Option<LibraryDownloads>,
     rules: Option<Vec<Rule>>,
     natives: Option<HashMap<String, String>>,
+    extract: Option<ExtractRules>,
 }
 
 #[derive(Debug, Deserialize)]
 struct LibraryDownloads {
     artifact: Option<DownloadInfo>,
     classifiers: Option<HashMap<String, DownloadInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractRules {
+    exclude: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +158,7 @@ where
     ensure_client_jar(&client, &version_details, instance_id, progress).await?;
     ensure_libraries(&client, &version_details, instance_id, progress).await?;
     ensure_assets(&client, &version_details, instance_id, progress).await?;
+    ensure_native_libraries(&client, &version_details, instance_id, progress).await?;
 
     emit_progress(
         progress,
@@ -368,6 +376,156 @@ async fn ensure_assets(
     Ok(())
 }
 
+async fn ensure_native_libraries(
+    client: &Client,
+    version_details: &VersionDetails,
+    instance_id: &str,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    let data_dir = crate::config::get_config().resolved_data_dir()?;
+    let libraries_dir = data_dir.join("libraries");
+    let natives_dir = data_dir
+        .join("versions")
+        .join(&version_details.id)
+        .join("natives")
+        .join(current_native_platform_dir_name());
+    let mut extracted_count = 0usize;
+
+    for library in version_details
+        .libraries
+        .iter()
+        .filter(|library| library_is_allowed(library))
+    {
+        if let Some(native_classifier) = native_classifier_for_current_os(library) {
+            let Some(downloads) = &library.downloads else {
+                return Err(MinecraftInstallError::MissingDownload {
+                    version: version_details.id.clone(),
+                    artifact: format!("{} ({native_classifier})", library.name),
+                });
+            };
+            let Some(classifiers) = &downloads.classifiers else {
+                return Err(MinecraftInstallError::MissingDownload {
+                    version: version_details.id.clone(),
+                    artifact: format!("{} ({native_classifier})", library.name),
+                });
+            };
+            let Some(native_download) = classifiers.get(&native_classifier) else {
+                return Err(MinecraftInstallError::MissingDownload {
+                    version: version_details.id.clone(),
+                    artifact: format!("{} ({native_classifier})", library.name),
+                });
+            };
+
+            ensure_native_archive(
+                client,
+                version_details,
+                instance_id,
+                progress,
+                &libraries_dir,
+                &natives_dir,
+                library,
+                &native_classifier,
+                native_download,
+            )
+            .await?;
+            extracted_count += 1;
+        }
+
+        if let Some(native_classifier) = native_artifact_classifier(library) {
+            let Some(downloads) = &library.downloads else {
+                return Err(MinecraftInstallError::MissingDownload {
+                    version: version_details.id.clone(),
+                    artifact: format!("{} ({native_classifier})", library.name),
+                });
+            };
+            let Some(native_download) = &downloads.artifact else {
+                return Err(MinecraftInstallError::MissingDownload {
+                    version: version_details.id.clone(),
+                    artifact: format!("{} ({native_classifier})", library.name),
+                });
+            };
+
+            ensure_native_archive(
+                client,
+                version_details,
+                instance_id,
+                progress,
+                &libraries_dir,
+                &natives_dir,
+                library,
+                &native_classifier,
+                native_download,
+            )
+            .await?;
+            extracted_count += 1;
+        }
+    }
+
+    if extracted_count == 0 {
+        return Err(MinecraftInstallError::UnsupportedPlatform(format!(
+            "no Minecraft native libraries were found for {} {}",
+            current_minecraft_os_name(),
+            current_minecraft_arch()
+        )));
+    }
+
+    info!(
+        path = %natives_dir.display(),
+        count = extracted_count,
+        "Minecraft native libraries are ready"
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn ensure_native_archive(
+    client: &Client,
+    version_details: &VersionDetails,
+    instance_id: &str,
+    progress: &(impl InstallProgressSink + ?Sized),
+    libraries_dir: &Path,
+    natives_dir: &Path,
+    library: &Library,
+    native_classifier: &str,
+    native_download: &DownloadInfo,
+) -> Result<(), MinecraftInstallError> {
+    let Some(native_path) = &native_download.path else {
+        return Err(MinecraftInstallError::MissingDownload {
+            version: version_details.id.clone(),
+            artifact: format!("{} ({native_classifier})", library.name),
+        });
+    };
+
+    let archive_path = libraries_dir.join(native_path);
+    download_verified_file(
+        client,
+        &native_download.url,
+        &archive_path,
+        native_download.size,
+        &native_download.sha1,
+        DownloadProgress {
+            instance_id,
+            phase: InstallPhase::MinecraftNatives,
+            label: format!("Downloading Minecraft native {}", library.name),
+            current_file: native_path.clone(),
+        },
+        progress,
+    )
+    .await?;
+
+    emit_progress(
+        progress,
+        instance_id,
+        InstallPhase::MinecraftNatives,
+        format!("Extracting Minecraft native {}", library.name),
+        0,
+        0,
+        Some(native_classifier.to_string()),
+    );
+    extract_native_archive(&archive_path, natives_dir, library.extract.as_ref())?;
+    Ok(())
+}
+
 async fn download_verified_file(
     client: &Client,
     url: &str,
@@ -483,6 +641,103 @@ fn library_is_allowed(library: &Library) -> bool {
     evaluate_rules(library.rules.as_deref())
 }
 
+fn native_classifier_for_current_os(library: &Library) -> Option<String> {
+    let classifier = library.natives.as_ref()?.get(current_minecraft_os_name())?;
+    Some(classifier.replace("${arch}", current_minecraft_arch_bits()))
+}
+
+fn native_artifact_classifier(library: &Library) -> Option<String> {
+    let classifier = library.name.split(':').nth(3)?;
+    classifier
+        .starts_with("natives-")
+        .then(|| classifier.to_string())
+}
+
+fn extract_native_archive(
+    archive_path: &Path,
+    destination_dir: &Path,
+    extract_rules: Option<&ExtractRules>,
+) -> Result<(), MinecraftInstallError> {
+    fs::create_dir_all(destination_dir)?;
+
+    let archive_file = fs::File::open(archive_path)?;
+    let mut archive = ZipArchive::new(archive_file).map_err(|error| {
+        MinecraftInstallError::Archive(format!(
+            "could not open native archive {}: {error}",
+            archive_path.display()
+        ))
+    })?;
+
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| {
+            MinecraftInstallError::Archive(format!(
+                "could not read native archive entry from {}: {error}",
+                archive_path.display()
+            ))
+        })?;
+        let entry_name = file.name().to_string();
+
+        if should_skip_native_entry(&entry_name, extract_rules) {
+            continue;
+        }
+
+        let Some(enclosed_name) = file.enclosed_name() else {
+            debug!(
+                archive = %archive_path.display(),
+                entry = %entry_name,
+                "Skipping unsafe native archive entry"
+            );
+            continue;
+        };
+        let destination = destination_dir.join(enclosed_name);
+
+        if file.is_dir() {
+            fs::create_dir_all(&destination)?;
+            continue;
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut output = fs::File::create(&destination)?;
+        io::copy(&mut file, &mut output)?;
+    }
+
+    Ok(())
+}
+
+fn should_skip_native_entry(entry_name: &str, extract_rules: Option<&ExtractRules>) -> bool {
+    let entry_name = entry_name.replace('\\', "/");
+    if entry_name.starts_with("META-INF/") {
+        return true;
+    }
+
+    let Some(extract_rules) = extract_rules else {
+        return false;
+    };
+    let Some(excludes) = &extract_rules.exclude else {
+        return false;
+    };
+
+    excludes
+        .iter()
+        .any(|exclude| native_entry_matches_exclude(&entry_name, exclude))
+}
+
+fn native_entry_matches_exclude(entry_name: &str, exclude: &str) -> bool {
+    let exclude = exclude.replace('\\', "/");
+    if exclude.is_empty() {
+        return false;
+    }
+
+    if exclude.ends_with('/') {
+        entry_name.starts_with(&exclude)
+    } else {
+        entry_name == exclude
+    }
+}
+
 fn evaluate_rules(rules: Option<&[Rule]>) -> bool {
     let Some(rules) = rules else {
         return true;
@@ -533,6 +788,21 @@ fn current_minecraft_arch() -> &'static str {
     }
 }
 
+fn current_minecraft_arch_bits() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86" | "i386" | "i586" | "i686" => "32",
+        _ => "64",
+    }
+}
+
+fn current_native_platform_dir_name() -> String {
+    format!(
+        "{}-{}",
+        current_minecraft_os_name(),
+        current_minecraft_arch()
+    )
+}
+
 struct DownloadProgress<'a> {
     instance_id: &'a str,
     phase: InstallPhase,
@@ -559,12 +829,20 @@ fn emit_progress(
     total_bytes: u64,
     current_file: Option<String>,
 ) {
+    let percentage = if total_bytes == 0 {
+        None
+    } else {
+        let downloaded_bytes = downloaded_bytes.min(total_bytes);
+        Some((downloaded_bytes as f64 / total_bytes as f64) * 100.0)
+    };
+
     sink.emit(InstallProgress {
         instance_id: instance_id.to_string(),
         phase,
         current_label: current_label.into(),
         downloaded_bytes,
         total_bytes,
+        percentage,
         current_file,
     });
 }
