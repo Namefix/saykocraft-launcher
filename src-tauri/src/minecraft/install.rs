@@ -234,10 +234,22 @@ async fn fetch_version_details(
         });
     }
 
-    response_version
-        .json::<VersionDetails>()
-        .await
-        .map_err(|error| MinecraftInstallError::InvalidManifest(error.to_string()))
+    let bytes = response_version.bytes().await?;
+    let version_details = serde_json::from_slice::<VersionDetails>(&bytes)
+        .map_err(|error| MinecraftInstallError::InvalidManifest(error.to_string()))?;
+
+    write_version_metadata(&version_details.id, &bytes)?;
+    Ok(version_details)
+}
+
+fn write_version_metadata(version: &str, bytes: &[u8]) -> Result<(), MinecraftInstallError> {
+    let version_dir = crate::config::get_config()
+        .resolved_data_dir()?
+        .join("versions")
+        .join(version);
+    fs::create_dir_all(&version_dir)?;
+    fs::write(version_dir.join(format!("{version}.json")), bytes)?;
+    Ok(())
 }
 
 async fn ensure_client_jar(

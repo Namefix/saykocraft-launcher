@@ -193,6 +193,22 @@ async fn fetch_remote_instance(id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn launch_instance(
+    id: String,
+    options: Option<minecraft::LaunchOptions>,
+) -> Result<u32, String> {
+    let manifest = instance::get_instances()
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.instance_manifest)
+        .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+
+    minecraft::launch::launch_instance(&manifest, options.unwrap_or_default())
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn init_tracing() -> WorkerGuard {
     let file_appender = rolling::daily("./logs", "launcher.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -271,6 +287,7 @@ pub fn run() {
             update_config_field,
             get_instance_state,
             fetch_remote_instance,
+            launch_instance,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
