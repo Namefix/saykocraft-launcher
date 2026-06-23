@@ -15,6 +15,7 @@ use super::{
 
 const VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const RESOURCE_BASE_URL: &str = "https://resources.download.minecraft.net";
 
 #[derive(Debug, Deserialize)]
 struct VersionsManifest {
@@ -57,6 +58,17 @@ struct AssetIndexRef {
     sha1: String,
     size: u64,
     url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AssetIndex {
+    objects: HashMap<String, AssetObject>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AssetObject {
+    hash: String,
+    size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +150,7 @@ where
     let version_details = fetch_version_details(&client, version).await?;
     ensure_client_jar(&client, &version_details, instance_id, progress).await?;
     ensure_libraries(&client, &version_details, instance_id, progress).await?;
+    ensure_assets(&client, &version_details, instance_id, progress).await?;
 
     emit_progress(
         progress,
@@ -285,6 +298,67 @@ async fn ensure_libraries(
                 phase: InstallPhase::MinecraftLibraries,
                 label: format!("Downloading Minecraft library {}", library.name),
                 current_file: artifact_path.clone(),
+            },
+            progress,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn ensure_assets(
+    client: &Client,
+    version_details: &VersionDetails,
+    instance_id: &str,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    let assets_dir = crate::config::get_config()
+        .resolved_data_dir()?
+        .join("assets");
+    let index_path = assets_dir
+        .join("indexes")
+        .join(format!("{}.json", version_details.asset_index.id));
+
+    download_verified_file(
+        client,
+        &version_details.asset_index.url,
+        &index_path,
+        version_details.asset_index.size,
+        &version_details.asset_index.sha1,
+        DownloadProgress {
+            instance_id,
+            phase: InstallPhase::MinecraftAssets,
+            label: format!(
+                "Downloading Minecraft asset index {}",
+                version_details.asset_index.id
+            ),
+            current_file: index_path.display().to_string(),
+        },
+        progress,
+    )
+    .await?;
+
+    let index_bytes = fs::read(&index_path)?;
+    let asset_index: AssetIndex = serde_json::from_slice(&index_bytes)
+        .map_err(|error| MinecraftInstallError::InvalidManifest(error.to_string()))?;
+
+    for (asset_name, asset) in asset_index.objects {
+        let prefix = sha1_prefix(&asset.hash, &asset_name)?;
+        let destination = assets_dir.join("objects").join(prefix).join(&asset.hash);
+        let url = format!("{RESOURCE_BASE_URL}/{prefix}/{}", asset.hash);
+
+        download_verified_file(
+            client,
+            &url,
+            &destination,
+            asset.size,
+            &asset.hash,
+            DownloadProgress {
+                instance_id,
+                phase: InstallPhase::MinecraftAssets,
+                label: format!("Downloading Minecraft asset {asset_name}"),
+                current_file: asset_name,
             },
             progress,
         )
@@ -464,6 +538,16 @@ struct DownloadProgress<'a> {
     phase: InstallPhase,
     label: String,
     current_file: String,
+}
+
+fn sha1_prefix<'a>(hash: &'a str, asset_name: &str) -> Result<&'a str, MinecraftInstallError> {
+    if hash.len() != 40 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(MinecraftInstallError::Validation(format!(
+            "asset {asset_name} has an invalid SHA-1 hash: {hash}"
+        )));
+    }
+
+    Ok(&hash[..2])
 }
 
 fn emit_progress(
