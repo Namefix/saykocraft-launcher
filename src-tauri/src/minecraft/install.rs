@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    ffi::OsString,
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, fs, io, path::Path};
 
 use reqwest::Client;
 use serde::Deserialize;
@@ -37,6 +32,7 @@ struct VersionDetails {
     downloads: VersionDownloads,
     libraries: Vec<Library>,
     asset_index: AssetIndexRef,
+    java_version: Option<super::java::JavaVersion>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +151,14 @@ where
         None,
     );
     let version_details = fetch_version_details(&client, version).await?;
+    super::java::ensure_runtime(
+        &client,
+        &version_details.id,
+        version_details.java_version.as_ref(),
+        instance_id,
+        progress,
+    )
+    .await?;
     ensure_client_jar(&client, &version_details, instance_id, progress).await?;
     ensure_libraries(&client, &version_details, instance_id, progress).await?;
     ensure_assets(&client, &version_details, instance_id, progress).await?;
@@ -465,7 +469,7 @@ async fn ensure_native_libraries(
         return Err(MinecraftInstallError::UnsupportedPlatform(format!(
             "no Minecraft native libraries were found for {} {}",
             current_minecraft_os_name(),
-            current_minecraft_arch()
+            crate::utils::current_arch_name()
         )));
     }
 
@@ -591,7 +595,7 @@ async fn download_verified_file(
         });
     }
 
-    let partial_destination = partial_path(destination);
+    let partial_destination = crate::utils::partial_path(destination);
     fs::write(&partial_destination, &bytes)?;
 
     if destination.exists() {
@@ -631,19 +635,13 @@ fn is_existing_file_valid(
     Ok(crate::utils::sha1_matches(&bytes, expected_sha1))
 }
 
-fn partial_path(path: &Path) -> PathBuf {
-    let mut partial = OsString::from(path.as_os_str());
-    partial.push(".part");
-    PathBuf::from(partial)
-}
-
 fn library_is_allowed(library: &Library) -> bool {
     evaluate_rules(library.rules.as_deref())
 }
 
 fn native_classifier_for_current_os(library: &Library) -> Option<String> {
     let classifier = library.natives.as_ref()?.get(current_minecraft_os_name())?;
-    Some(classifier.replace("${arch}", current_minecraft_arch_bits()))
+    Some(classifier.replace("${arch}", crate::utils::current_arch_bits()))
 }
 
 fn native_artifact_classifier(library: &Library) -> Option<String> {
@@ -768,11 +766,11 @@ fn os_rule_matches(os: &RuleOs) -> bool {
         && os
             .arch
             .as_ref()
-            .map_or(true, |arch| arch == current_minecraft_arch())
+            .map_or(true, |arch| arch == crate::utils::current_arch_name())
 }
 
 fn current_minecraft_os_name() -> &'static str {
-    match std::env::consts::OS {
+    match crate::utils::current_os_name() {
         "macos" => "osx",
         "windows" => "windows",
         "linux" => "linux",
@@ -780,26 +778,11 @@ fn current_minecraft_os_name() -> &'static str {
     }
 }
 
-fn current_minecraft_arch() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86" | "i386" | "i586" | "i686" => "x86",
-        "x86_64" | "amd64" => "x86_64",
-        other => other,
-    }
-}
-
-fn current_minecraft_arch_bits() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86" | "i386" | "i586" | "i686" => "32",
-        _ => "64",
-    }
-}
-
 fn current_native_platform_dir_name() -> String {
     format!(
         "{}-{}",
         current_minecraft_os_name(),
-        current_minecraft_arch()
+        crate::utils::current_arch_name()
     )
 }
 

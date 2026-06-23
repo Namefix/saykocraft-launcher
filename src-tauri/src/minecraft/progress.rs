@@ -16,6 +16,7 @@ pub struct InstallProgress {
 pub enum InstallPhase {
     Preparing,
     MinecraftManifest,
+    JavaRuntime,
     MinecraftClient,
     MinecraftLibraries,
     MinecraftAssets,

@@ -1,6 +1,10 @@
 use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::Sha256;
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 fn parse_semver(version: &str) -> Option<(u64, u64, u64, Option<&str>)> {
     let version = version.strip_prefix('v').unwrap_or(version);
@@ -80,4 +84,33 @@ pub fn sha1_hex(bytes: &[u8]) -> String {
 
 pub fn sha1_matches(bytes: &[u8], expected: &str) -> bool {
     sha1_hex(bytes).eq_ignore_ascii_case(expected)
+}
+
+pub fn current_os_name() -> &'static str {
+    std::env::consts::OS
+}
+
+pub fn current_arch_name() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86" | "i386" | "i586" | "i686" => "x86",
+        "x86_64" | "amd64" => "x86_64",
+        other => other,
+    }
+}
+
+pub fn current_arch_bits() -> &'static str {
+    match current_arch_name() {
+        "x86" => "32",
+        _ => "64",
+    }
+}
+
+pub fn current_platform_dir_name() -> String {
+    format!("{}-{}", current_os_name(), current_arch_name())
+}
+
+pub fn partial_path(path: &Path) -> PathBuf {
+    let mut partial = OsString::from(path.as_os_str());
+    partial.push(".part");
+    PathBuf::from(partial)
 }
