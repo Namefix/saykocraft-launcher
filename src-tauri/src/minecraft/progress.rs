@@ -8,10 +8,11 @@ pub struct InstallProgress {
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     pub percentage: Option<f64>,
+    pub overall_percentage: Option<f64>,
     pub current_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallPhase {
     Preparing,

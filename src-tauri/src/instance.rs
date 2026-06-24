@@ -1,5 +1,6 @@
 use std::{
     cmp::Ordering,
+    collections::HashMap,
     fmt, fs, io,
     path::Path,
     sync::{OnceLock, RwLock},
@@ -8,9 +9,11 @@ use std::{
 
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
 const CDN_URL: &str = "http://localhost:3001";
+const INSTANCE_STATE_CHANGED_EVENT: &str = "instance-state-changed";
 
 const INSTANCE_MANIFEST_FILE: &str = "instance.json";
 const REMOTE_INSTANCE_IDS: &[&str] = &["saykocraft-earth"];
@@ -83,15 +86,26 @@ pub struct InstanceEntry {
     pub instance_manifest: Option<InstanceManifest>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceState {
     Unknown,
-    NotInstalled,
+    NotDownloaded,
+    Downloading,
     RequiresUpdate,
+    Updating,
     Ready,
     Launched,
     Broken,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceStateChanged {
+    pub id: String,
+    pub state: InstanceState,
+    pub state_code: u8,
 }
 
 #[derive(Debug)]
@@ -120,6 +134,14 @@ impl fmt::Display for RemoteInstanceError {
 impl std::error::Error for RemoteInstanceError {}
 
 static INSTANCES: OnceLock<RwLock<Vec<InstanceEntry>>> = OnceLock::new();
+static INSTANCE_STATE_OVERRIDES: OnceLock<RwLock<HashMap<String, InstanceState>>> = OnceLock::new();
+static INSTANCE_EVENT_APP: OnceLock<AppHandle> = OnceLock::new();
+
+pub fn register_instance_event_app(app: AppHandle) {
+    if INSTANCE_EVENT_APP.set(app).is_err() {
+        debug!("Instance state event app is already registered");
+    }
+}
 
 fn read_local_instances() -> io::Result<Vec<InstanceEntry>> {
     let instance_dir = crate::config::get_config().resolved_install_dir()?;
@@ -171,9 +193,25 @@ fn replace_instances(instances: Vec<InstanceEntry>) -> io::Result<()> {
         .write()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
 
+    let changed_instance_ids = instances
+        .iter()
+        .filter(|instance| {
+            cached_instances
+                .iter()
+                .find(|cached| cached.id == instance.id)
+                .map_or(true, |cached| cached.state != instance.state)
+        })
+        .map(|instance| instance.id.clone())
+        .collect::<Vec<_>>();
+
     let instance_count = instances.len();
     *cached_instances = instances;
+    drop(cached_instances);
+
     debug!(instance_count, "Updated local instances");
+    for instance_id in changed_instance_ids {
+        emit_instance_state_changed(&instance_id, get_instance_state(&instance_id));
+    }
 
     Ok(())
 }
@@ -195,7 +233,7 @@ fn read_local_instance(root: &Path, manifest_path: &Path) -> io::Result<Instance
 
     Ok(InstanceEntry {
         id: instance_manifest.id.clone(),
-        state: InstanceState::NotInstalled,
+        state: InstanceState::NotDownloaded,
         instance_manifest: Some(instance_manifest),
     })
 }
@@ -270,16 +308,6 @@ fn write_instance_manifest(path: &Path, instance: &InstanceManifest) -> io::Resu
     debug!(path = %path.display(), "Written instance manifest");
 
     Ok(())
-}
-
-fn read_packfile_manifest(path: &Path) -> io::Result<PackFileManifest> {
-    let data = fs::read(path)?;
-    serde_json::from_slice::<PackFileManifest>(&data).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("failed to parse pack file manifest: {error}"),
-        )
-    })
 }
 
 pub async fn fetch_pack_file_manifest(instance: &InstanceManifest) -> io::Result<PackFileManifest> {
@@ -426,7 +454,7 @@ pub async fn init_instances() -> io::Result<()> {
                 debug!(id = %instance_id, "Instance not installed");
                 instances.push(empty_instance_entry(
                     instance_id,
-                    InstanceState::NotInstalled,
+                    InstanceState::NotDownloaded,
                 ));
             }
             (Err(error), Some(local_instance)) => {
@@ -474,7 +502,7 @@ fn determine_instance_state(
     local_instance: Option<&InstanceManifest>,
 ) -> InstanceState {
     let Some(local_instance) = local_instance else {
-        return InstanceState::NotInstalled;
+        return InstanceState::NotDownloaded;
     };
 
     let version_difference =
@@ -508,11 +536,72 @@ fn determine_instance_state(
 }
 
 pub fn get_instance_state(id: &str) -> InstanceState {
+    if let Some(state) = get_instance_state_override(id) {
+        return state;
+    }
+
     let instances = get_instances();
 
     match instances.iter().find(|&x| x.id == id) {
         Some(i) => i.state.clone(),
         None => InstanceState::Unknown,
+    }
+}
+
+fn get_instance_state_override(id: &str) -> Option<InstanceState> {
+    INSTANCE_STATE_OVERRIDES
+        .get_or_init(|| RwLock::new(HashMap::new()))
+        .read()
+        .ok()
+        .and_then(|states| states.get(id).cloned())
+}
+
+pub fn set_instance_state_override(id: &str, state: InstanceState) -> io::Result<()> {
+    let previous_state = get_instance_state(id);
+    let states = INSTANCE_STATE_OVERRIDES.get_or_init(|| RwLock::new(HashMap::new()));
+    let mut states = states
+        .write()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
+
+    states.insert(id.to_string(), state);
+    drop(states);
+
+    if previous_state != state {
+        emit_instance_state_changed(id, state);
+    }
+
+    Ok(())
+}
+
+pub fn clear_instance_state_override(id: &str) -> io::Result<()> {
+    let states = INSTANCE_STATE_OVERRIDES.get_or_init(|| RwLock::new(HashMap::new()));
+    let mut states = states
+        .write()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
+
+    let removed_state = states.remove(id);
+    drop(states);
+
+    if removed_state.is_some() {
+        emit_instance_state_changed(id, get_instance_state(id));
+    }
+
+    Ok(())
+}
+
+fn emit_instance_state_changed(id: &str, state: InstanceState) {
+    let Some(app) = INSTANCE_EVENT_APP.get() else {
+        return;
+    };
+
+    let payload = InstanceStateChanged {
+        id: id.to_string(),
+        state,
+        state_code: state as u8,
+    };
+
+    if let Err(error) = app.emit(INSTANCE_STATE_CHANGED_EVENT, payload) {
+        warn!(%error, id, "Failed to emit instance state change");
     }
 }
 

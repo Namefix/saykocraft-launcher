@@ -5,15 +5,17 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Mutex, OnceLock},
 };
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::MinecraftInstallError;
-use crate::instance::ModLoaderType;
+use crate::instance::{InstanceState, ModLoaderType};
 
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
+static RUNNING_INSTANCES: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +46,7 @@ pub enum MinecraftLaunchError {
     InvalidManifest(String),
     Validation(String),
     MissingFile(String),
+    Process(String),
 }
 
 impl fmt::Display for MinecraftLaunchError {
@@ -56,6 +59,7 @@ impl fmt::Display for MinecraftLaunchError {
             }
             Self::Validation(message) => write!(f, "invalid Minecraft launch request: {message}"),
             Self::MissingFile(path) => write!(f, "Minecraft launch file is missing: {path}"),
+            Self::Process(message) => write!(f, "Minecraft process control failed: {message}"),
         }
     }
 }
@@ -84,6 +88,7 @@ impl From<io::Error> for MinecraftLaunchError {
 
 #[derive(Debug)]
 struct LaunchContext {
+    instance_id: String,
     java_path: PathBuf,
     working_dir: PathBuf,
     main_class: String,
@@ -199,8 +204,25 @@ pub fn launch_instance(
     manifest: &crate::instance::InstanceManifest,
     options: LaunchOptions,
 ) -> Result<LaunchResult, MinecraftLaunchError> {
+    if running_instance_pid(&manifest.id)?.is_some() {
+        return Err(MinecraftLaunchError::Validation(format!(
+            "instance is already running: {}",
+            manifest.id
+        )));
+    }
+
     let context = build_launch_context(manifest, options)?;
     run_minecraft(context)
+}
+
+pub fn stop_instance(instance_id: &str) -> Result<(), MinecraftLaunchError> {
+    let pid = running_instance_pid(instance_id)?.ok_or_else(|| {
+        MinecraftLaunchError::Validation(format!("instance is not running: {instance_id}"))
+    })?;
+
+    terminate_process(pid)?;
+    info!(instance_id, pid, "Minecraft process stop requested");
+    Ok(())
 }
 
 fn build_launch_context(
@@ -253,6 +275,7 @@ fn build_launch_context(
     game_args.extend(options.extra_game_args);
 
     Ok(LaunchContext {
+        instance_id: manifest.id.clone(),
         java_path,
         working_dir,
         main_class: version_details.main_class,
@@ -285,15 +308,30 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
 
     let mut child = command.spawn()?;
     let pid = child.id();
+    if let Err(error) = register_running_instance(&context.instance_id, pid) {
+        if let Err(kill_error) = child.kill() {
+            warn!(%kill_error, pid, "Failed to kill duplicate Minecraft process");
+        }
+        return Err(error);
+    }
+    crate::instance::set_instance_state_override(&context.instance_id, InstanceState::Launched)?;
+
     info!(
         pid,
+        instance_id = %context.instance_id,
         java = %context.java_path.display(),
         working_dir = %context.working_dir.display(),
         log = %log_path.display(),
         "Minecraft process started"
     );
 
-    let status = child.wait()?;
+    let status = child.wait();
+    unregister_running_instance(&context.instance_id);
+    if let Err(error) = crate::instance::clear_instance_state_override(&context.instance_id) {
+        warn!(%error, instance_id = %context.instance_id, "Failed to clear launched instance state");
+    }
+
+    let status = status?;
     let result = LaunchResult {
         pid,
         exit_code: status.code(),
@@ -303,12 +341,78 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
 
     info!(
         pid,
+        instance_id = %context.instance_id,
         exit_code = ?result.exit_code,
         success = result.success,
         "Minecraft process exited"
     );
 
     Ok(result)
+}
+
+fn running_instances() -> &'static Mutex<HashMap<String, u32>> {
+    RUNNING_INSTANCES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn running_instance_pid(instance_id: &str) -> Result<Option<u32>, MinecraftLaunchError> {
+    Ok(running_instances()
+        .lock()
+        .map_err(mutex_poisoned_error)?
+        .get(instance_id)
+        .copied())
+}
+
+fn register_running_instance(instance_id: &str, pid: u32) -> Result<(), MinecraftLaunchError> {
+    let mut running_instances = running_instances().lock().map_err(mutex_poisoned_error)?;
+    if running_instances.contains_key(instance_id) {
+        return Err(MinecraftLaunchError::Validation(format!(
+            "instance is already running: {instance_id}"
+        )));
+    }
+
+    running_instances.insert(instance_id.to_string(), pid);
+    Ok(())
+}
+
+fn unregister_running_instance(instance_id: &str) {
+    let Ok(mut running_instances) = running_instances().lock() else {
+        warn!("Failed to lock running Minecraft instance registry for cleanup");
+        return;
+    };
+
+    running_instances.remove(instance_id);
+}
+
+fn mutex_poisoned_error<T>(error: std::sync::PoisonError<T>) -> MinecraftLaunchError {
+    MinecraftLaunchError::Io(io::Error::new(
+        io::ErrorKind::Other,
+        format!("running Minecraft instance registry lock poisoned: {error}"),
+    ))
+}
+
+fn terminate_process(pid: u32) -> Result<(), MinecraftLaunchError> {
+    let status = terminate_process_command(pid).status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(MinecraftLaunchError::Process(format!(
+        "failed to stop Minecraft process {pid}: {status}"
+    )))
+}
+
+#[cfg(windows)]
+fn terminate_process_command(pid: u32) -> Command {
+    let mut command = Command::new("taskkill");
+    command.arg("/PID").arg(pid.to_string()).arg("/T");
+    command
+}
+
+#[cfg(not(windows))]
+fn terminate_process_command(pid: u32) -> Command {
+    let mut command = Command::new("kill");
+    command.arg(pid.to_string());
+    command
 }
 
 fn read_version_details(version: &str) -> Result<VersionDetails, MinecraftLaunchError> {

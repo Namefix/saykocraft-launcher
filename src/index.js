@@ -1,5 +1,3 @@
-const tauriEvent = window.__TAURI__?.event;
-
 const loadingDiv = document.getElementById("loadingDiv");
 const centerDiv = document.getElementById("centerDiv");
 const errorMessage = document.getElementById("errorMessage");

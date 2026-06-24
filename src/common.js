@@ -1,14 +1,17 @@
 const { invoke } = window.__TAURI__.core;
 const { openUrl } = window.__TAURI__.opener;
 const { listen } = window.__TAURI__.event;
+const tauriEvent = window.__TAURI__?.event;
 
 const InstanceState = Object.freeze({
     Unknown: 0,
-    NotInstalled: 1,
-    RequiresUpdate: 2,
-    Ready: 3,
-    Launched: 4,
-    Broken: 5
+    NotDownloaded: 1,
+    Downloading: 2,
+    RequiresUpdate: 3,
+    Updating: 4,
+    Ready: 5,
+    Launched: 6,
+    Broken: 7
 });
 
 function onClose(e) {

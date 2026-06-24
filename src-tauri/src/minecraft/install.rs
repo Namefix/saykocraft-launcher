@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs, io,
     path::{Component, Path, PathBuf},
+    sync::Mutex,
 };
 
 use reqwest::Client;
@@ -9,7 +10,9 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use zip::ZipArchive;
 
-use crate::instance::{InstanceManifest, ModLoaderType, PackFile, PackFileManifest, UpdatePolicy};
+use crate::instance::{
+    InstanceManifest, InstanceState, ModLoaderType, PackFile, PackFileManifest, UpdatePolicy,
+};
 
 use super::{
     InstallPhase, InstallProgress, InstallProgressSink, MinecraftInstallError, NoopProgressSink,
@@ -117,15 +120,92 @@ struct RuleOs {
 
 pub async fn ensure_instance(instance_id: &str) -> Result<(), MinecraftInstallError> {
     let progress = NoopProgressSink;
-    let instance = crate::instance::get_instances()
+    ensure_instance_with_progress_by_id(instance_id, &progress).await
+}
+
+pub async fn ensure_instance_with_progress_by_id<S>(
+    instance_id: &str,
+    progress: &S,
+) -> Result<(), MinecraftInstallError>
+where
+    S: InstallProgressSink + ?Sized,
+{
+    let instance = get_or_fetch_instance(instance_id, progress).await?;
+    ensure_instance_with_progress(&instance, progress).await
+}
+
+async fn get_or_fetch_instance<S>(
+    instance_id: &str,
+    progress: &S,
+) -> Result<InstanceManifest, MinecraftInstallError>
+where
+    S: InstallProgressSink + ?Sized,
+{
+    if matches!(
+        find_cached_instance_state(instance_id),
+        Some(InstanceState::RequiresUpdate)
+    ) {
+        emit_progress(
+            progress,
+            instance_id,
+            InstallPhase::Preparing,
+            format!("Fetching updated instance {instance_id} manifest"),
+            0,
+            0,
+            None,
+        );
+
+        info!(
+            id = %instance_id,
+            "Instance update is available, fetching remote instance manifest"
+        );
+        crate::instance::fetch_remote_instance(instance_id).await?;
+        return find_cached_instance(instance_id).ok_or_else(|| {
+            MinecraftInstallError::Validation(format!(
+                "instance manifest is unavailable after fetching update: {instance_id}"
+            ))
+        });
+    }
+
+    if let Some(instance) = find_cached_instance(instance_id) {
+        return Ok(instance);
+    }
+
+    emit_progress(
+        progress,
+        instance_id,
+        InstallPhase::Preparing,
+        format!("Fetching instance {instance_id} manifest"),
+        0,
+        0,
+        None,
+    );
+
+    info!(
+        id = %instance_id,
+        "Instance manifest not found locally, fetching remote instance"
+    );
+    crate::instance::fetch_remote_instance(instance_id).await?;
+
+    find_cached_instance(instance_id).ok_or_else(|| {
+        MinecraftInstallError::Validation(format!(
+            "instance manifest is unavailable after fetching: {instance_id}"
+        ))
+    })
+}
+
+fn find_cached_instance(instance_id: &str) -> Option<InstanceManifest> {
+    crate::instance::get_instances()
         .into_iter()
         .find(|entry| entry.id == instance_id)
         .and_then(|entry| entry.instance_manifest)
-        .ok_or_else(|| {
-            MinecraftInstallError::Validation(format!("instance is not installed: {instance_id}"))
-        })?;
+}
 
-    ensure_instance_with_progress(&instance, &progress).await
+fn find_cached_instance_state(instance_id: &str) -> Option<InstanceState> {
+    crate::instance::get_instances()
+        .into_iter()
+        .find(|entry| entry.id == instance_id)
+        .map(|entry| entry.state)
 }
 
 pub async fn ensure_instance_with_progress<S>(
@@ -135,8 +215,10 @@ pub async fn ensure_instance_with_progress<S>(
 where
     S: InstallProgressSink + ?Sized,
 {
+    let progress = OverallProgressSink::new(progress);
+
     emit_progress(
-        progress,
+        &progress,
         &instance.id,
         InstallPhase::Preparing,
         format!("Preparing instance {}", instance.name),
@@ -146,12 +228,12 @@ where
     );
 
     let client = Client::new();
-    let java_path = ensure_minecraft_installation(&client, instance, progress).await?;
-    ensure_mod_loader(&client, instance, &java_path, progress).await?;
-    ensure_modpack_files(&client, instance, progress).await?;
+    let java_path = ensure_minecraft_installation(&client, instance, &progress).await?;
+    ensure_mod_loader(&client, instance, &java_path, &progress).await?;
+    ensure_modpack_files(&client, instance, &progress).await?;
 
     emit_progress(
-        progress,
+        &progress,
         &instance.id,
         InstallPhase::Done,
         "Instance is ready",
@@ -166,6 +248,82 @@ where
     );
 
     Ok(())
+}
+
+struct OverallProgressSink<'a, S>
+where
+    S: InstallProgressSink + ?Sized,
+{
+    inner: &'a S,
+    state: Mutex<OverallProgressState>,
+}
+
+impl<'a, S> OverallProgressSink<'a, S>
+where
+    S: InstallProgressSink + ?Sized,
+{
+    fn new(inner: &'a S) -> Self {
+        Self {
+            inner,
+            state: Mutex::new(OverallProgressState::default()),
+        }
+    }
+}
+
+impl<S> InstallProgressSink for OverallProgressSink<'_, S>
+where
+    S: InstallProgressSink + ?Sized,
+{
+    fn emit(&self, mut progress: InstallProgress) {
+        progress.overall_percentage = self
+            .state
+            .lock()
+            .ok()
+            .map(|mut state| state.update(&progress));
+
+        self.inner.emit(progress);
+    }
+}
+
+#[derive(Default)]
+struct OverallProgressState {
+    last_percentage: f64,
+}
+
+impl OverallProgressState {
+    fn update(&mut self, progress: &InstallProgress) -> f64 {
+        let next_percentage = match progress.phase {
+            InstallPhase::Done => 100.0,
+            phase => {
+                let (start, end) = overall_phase_range(phase);
+                let phase_fraction = progress
+                    .percentage
+                    .map(|percentage| (percentage / 100.0).clamp(0.0, 1.0))
+                    .unwrap_or(0.0);
+
+                start + ((end - start) * phase_fraction)
+            }
+        };
+
+        self.last_percentage = self.last_percentage.max(next_percentage).min(100.0);
+        self.last_percentage
+    }
+}
+
+fn overall_phase_range(phase: InstallPhase) -> (f64, f64) {
+    match phase {
+        InstallPhase::Preparing => (0.0, 2.0),
+        InstallPhase::MinecraftManifest => (2.0, 5.0),
+        InstallPhase::JavaRuntime => (5.0, 20.0),
+        InstallPhase::MinecraftClient => (20.0, 30.0),
+        InstallPhase::MinecraftLibraries => (30.0, 45.0),
+        InstallPhase::MinecraftAssets => (45.0, 70.0),
+        InstallPhase::MinecraftNatives => (70.0, 75.0),
+        InstallPhase::NeoForge => (75.0, 88.0),
+        InstallPhase::ModpackFiles => (88.0, 99.0),
+        InstallPhase::Finalizing => (99.0, 100.0),
+        InstallPhase::Done => (100.0, 100.0),
+    }
 }
 
 async fn ensure_minecraft_installation(
@@ -813,7 +971,7 @@ async fn download_verified_file(
         expected_size,
         Some(progress_info.current_file),
     );
-    info!(path = %destination.display(), "Downloaded Minecraft file");
+    debug!(path = %destination.display(), "Downloaded Minecraft file");
     Ok(())
 }
 
@@ -893,7 +1051,7 @@ async fn download_verified_sha256_file(
         expected_size,
         Some(progress_info.current_file),
     );
-    info!(path = %destination.display(), "Downloaded SHA-256 verified file");
+    debug!(path = %destination.display(), "Downloaded SHA-256 verified file");
     Ok(())
 }
 
@@ -1145,6 +1303,7 @@ fn emit_progress(
         downloaded_bytes,
         total_bytes,
         percentage,
+        overall_percentage: None,
         current_file,
     });
 }

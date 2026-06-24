@@ -365,7 +365,7 @@ async fn download_verified_sha1_file(
         total_bytes,
         Some(progress_info.current_file),
     );
-    info!(path = %destination.display(), "Downloaded NeoForge file");
+    debug!(path = %destination.display(), "Downloaded NeoForge file");
     Ok(())
 }
 
@@ -427,6 +427,7 @@ fn emit_progress(
         downloaded_bytes,
         total_bytes,
         percentage,
+        overall_percentage: None,
         current_file,
     });
 }

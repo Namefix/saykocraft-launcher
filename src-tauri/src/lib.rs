@@ -194,10 +194,31 @@ async fn fetch_remote_instance(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn ensure_instance(id: String) -> Result<(), String> {
-    minecraft::install::ensure_instance(&id)
+async fn ensure_instance(app: AppHandle, id: String) -> Result<(), String> {
+    let install_state = match instance::get_instance_state(&id) {
+        instance::InstanceState::RequiresUpdate | instance::InstanceState::Updating => {
+            instance::InstanceState::Updating
+        }
+        _ => instance::InstanceState::Downloading,
+    };
+    instance::set_instance_state_override(&id, install_state).map_err(|e| e.to_string())?;
+
+    let progress_app = app.clone();
+    let progress_sink = move |progress: minecraft::InstallProgress| {
+        if let Err(error) = progress_app.emit("instance-install-progress", progress) {
+            warn!(%error, "Failed to emit instance install progress");
+        }
+    };
+
+    let result = minecraft::install::ensure_instance_with_progress_by_id(&id, &progress_sink)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+
+    if let Err(error) = instance::clear_instance_state_override(&id) {
+        warn!(%error, id = %id, "Failed to clear instance state override");
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -210,7 +231,16 @@ async fn launch_instance(
         .find(|entry| entry.id == id)
         .and_then(|entry| entry.instance_manifest)
         .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
-    let options = options.unwrap_or_default();
+    let mut options = options.unwrap_or_default();
+    if options
+        .username
+        .as_deref()
+        .map(str::trim)
+        .filter(|username| !username.is_empty())
+        .is_none()
+    {
+        options.username = get_username().await?;
+    }
 
     tauri::async_runtime::spawn_blocking(move || {
         minecraft::launch::launch_instance(&manifest, options)
@@ -218,6 +248,14 @@ async fn launch_instance(
     .await
     .map_err(|error| format!("Minecraft launch task failed: {error}"))?
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn stop_instance(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || minecraft::launch::stop_instance(&id))
+        .await
+        .map_err(|error| format!("Minecraft stop task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 fn init_tracing() -> WorkerGuard {
@@ -256,17 +294,16 @@ pub fn run() {
         error!("Failed to ensure data directory: {e}");
     }
 
-    if let Err(error) = tauri::async_runtime::block_on(instance::init_instances()) {
-        error!(%error, "Failed to initialize instances");
-    }
-
-    if let Err(error) =
-        tauri::async_runtime::block_on(minecraft::install::ensure_instance("saykocraft-earth"))
-    {
-        error!(%error, "Failed to ensure instance");
-    }
-
     tauri::Builder::default()
+        .setup(|app| {
+            instance::register_instance_event_app(app.handle().clone());
+
+            if let Err(error) = tauri::async_runtime::block_on(instance::init_instances()) {
+                error!(%error, "Failed to initialize instances");
+            }
+
+            Ok(())
+        })
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -300,6 +337,7 @@ pub fn run() {
             fetch_remote_instance,
             ensure_instance,
             launch_instance,
+            stop_instance,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

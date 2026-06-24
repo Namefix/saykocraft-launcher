@@ -8,6 +8,9 @@ let lastSelectedServer = document.querySelector(".serverlist .server.selected") 
 const modpackActionButton = document.getElementById("modpack-actionbutton");
 const modpackActionButtonLabel = document.getElementById("modpack-actionbutton-label");
 
+const launcherProgressBar = document.getElementById("launcher-progressbar");
+const launcherLoadingBar = document.getElementById("launcher-loadingbar");
+
 const launcherSettingsVersionText = document.getElementById("sayko-launcherversion");
 
 const LauncherView = Object.freeze({
@@ -91,40 +94,118 @@ async function setLauncherVersion() {
 async function setModpackButton() {
     let buttonState = await invoke("get_instance_state", {id:"saykocraft-earth"});
 
+    switch(Object.values(InstanceState)[buttonState]) {
+        case InstanceState.Unknown:
+        case InstanceState.Broken: {
+            setActionButtonState(null, t("action.broken"), true);
+            break;
+        }
+        case InstanceState.RequiresUpdate: {
+            setActionButtonState("update", t("action.update"));
+            break;
+        }
+        case InstanceState.Updating: {
+            setActionButtonState("update", t("action.updating"), true);
+            break;
+        }
+        case InstanceState.Ready: {
+            setActionButtonState("start", t("action.start"));
+            break;
+        }
+        case InstanceState.Launched: {
+            setActionButtonState("stop", t("action.stop"));
+            break;
+        }
+        case InstanceState.NotDownloaded: {
+            setActionButtonState("download", t("action.download"));
+            break;
+        }
+        case InstanceState.Downloading: {
+            setActionButtonState("download", t("action.downloading"), true);
+            break;
+        }
+    }
+}
+
+function setActionButtonState(classname, labeltext, disabled=false) {
     modpackActionButton.classList.remove("disabled");
     modpackActionButton.classList.remove("start");
     modpackActionButton.classList.remove("stop");
     modpackActionButton.classList.remove("update");
     modpackActionButton.classList.remove("download");
+    
+    if(classname) modpackActionButton.classList.add(classname);
+    if(disabled) modpackActionButton.classList.add("disabled");
+    modpackActionButtonLabel.textContent = labeltext;
+}
+
+async function actionButtonHandler() {
+    let buttonState = await invoke("get_instance_state", {id:"saykocraft-earth"});
 
     switch(Object.values(InstanceState)[buttonState]) {
-        case InstanceState.Unknown:
-        case InstanceState.Broken: {
-            modpackActionButton.classList.add("disabled");
-            modpackActionButtonLabel.textContent = t("action.broken");
+        case InstanceState.NotDownloaded: {
+            downloadInstance("saykocraft-earth");
             break;
         }
         case InstanceState.RequiresUpdate: {
-            modpackActionButton.classList.add("update");
-            modpackActionButtonLabel.textContent = t("action.update");
-            console.log(t("action.update"))
             break;
         }
         case InstanceState.Ready: {
-            modpackActionButton.classList.add("start");
-            modpackActionButtonLabel.textContent = t("action.start");
+            startInstance("saykocraft-earth");
             break;
         }
         case InstanceState.Launched: {
-            modpackActionButton.classList.add("stop");
-            modpackActionButtonLabel.textContent = t("action.stop");
+            stopInstance("saykocraft-earth");
             break;
         }
-        case InstanceState.NotInstalled: {
-            modpackActionButton.classList.add("download");
-            modpackActionButtonLabel.textContent = t("action.download");
-            break;
-        }
+    }
+}
+
+function setProgressBarPercentage(value) {
+    if(value > 0) {
+        launcherLoadingBar.classList.add("active");
+    } else {
+        launcherLoadingBar.classList.remove("active");
+    }
+
+    launcherProgressBar.style = `width: ${value}%`;
+}
+
+async function downloadInstance(id) {
+    console.log("Downloading instance", id);
+
+    let result = await invoke("ensure_instance", {id});
+    console.log("Instance downloaded result", result);
+    setProgressBarPercentage(0);
+}
+
+async function startInstance(id) {
+    console.log("Starting instance", id);
+
+    let result = await invoke("launch_instance", {id});
+    console.log("Instance exited", result);
+}
+
+async function stopInstance(id) {
+    console.log("Stopping instance", id);
+
+    await invoke("stop_instance", {id});
+}
+
+async function setEventListeners() {
+    if(tauriEvent?.listen) {
+        tauriEvent.listen("instance-install-progress", (event) => {
+            const progress = event.payload;
+
+            console.log(progress);
+
+            setProgressBarPercentage(progress.overall_percentage ?? 0);
+        });
+
+        tauriEvent.listen("instance-state-changed", (event) => {
+            const { id, state, stateCode } = event.payload;
+            setModpackButton();
+        });
     }
 }
 
@@ -136,6 +217,7 @@ async function initializeLauncher() {
     setLauncherVersion();
     setLauncherView(LauncherView.MAIN);
     setModpackButton();
+    setEventListeners();
 }
 
 initializeLauncher().catch(console.error);

@@ -51,7 +51,7 @@
                     <img draggable="false" class="server-logo" src="assets/images/earth-text.png">
                 
                     <div class="modpack-buttons">
-                        <button id="modpack-actionbutton" class="button-action start">
+                        <button id="modpack-actionbutton" onclick="actionButtonHandler()" class="button-action start">
                             <!--<svg class="icon icon-play" aria-label="Modpack action" data-i18n-aria-label="modpackAction">
                                 <use href="assets/icons/sprite.svg#play"></use>
                             </svg>-->
@@ -97,8 +97,8 @@
                     </div>
                 </div>
 
-                <div class="loading-bar">
-                    <div class="bar-progress"></div>
+                <div class="loading-bar" id="launcher-loadingbar">
+                    <div id="launcher-progressbar" class="bar-progress"></div>
                 </div>
             </div>
         </div>

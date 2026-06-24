@@ -294,7 +294,7 @@ async fn download_verified_archive(
         package.size,
         Some(progress_info.current_file),
     );
-    info!(path = %destination.display(), "Downloaded Java runtime archive");
+    debug!(path = %destination.display(), "Downloaded Java runtime archive");
     Ok(())
 }
 
@@ -568,6 +568,7 @@ fn emit_progress(
         downloaded_bytes,
         total_bytes,
         percentage,
+        overall_percentage: None,
         current_file,
     });
 }
