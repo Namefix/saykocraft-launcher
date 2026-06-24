@@ -194,19 +194,30 @@ async fn fetch_remote_instance(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn ensure_instance(id: String) -> Result<(), String> {
+    minecraft::install::ensure_instance(&id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn launch_instance(
     id: String,
     options: Option<minecraft::LaunchOptions>,
-) -> Result<u32, String> {
+) -> Result<minecraft::LaunchResult, String> {
     let manifest = instance::get_instances()
         .into_iter()
         .find(|entry| entry.id == id)
         .and_then(|entry| entry.instance_manifest)
         .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+    let options = options.unwrap_or_default();
 
-    minecraft::launch::launch_instance(&manifest, options.unwrap_or_default())
-        .await
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        minecraft::launch::launch_instance(&manifest, options)
+    })
+    .await
+    .map_err(|error| format!("Minecraft launch task failed: {error}"))?
+    .map_err(|error| error.to_string())
 }
 
 fn init_tracing() -> WorkerGuard {
@@ -250,9 +261,9 @@ pub fn run() {
     }
 
     if let Err(error) =
-        tauri::async_runtime::block_on(minecraft::install::ensure_minecraft_installation("1.21.1"))
+        tauri::async_runtime::block_on(minecraft::install::ensure_instance("saykocraft-earth"))
     {
-        error!(%error, "Failed to ensure Minecraft installation");
+        error!(%error, "Failed to ensure instance");
     }
 
     tauri::Builder::default()
@@ -287,6 +298,7 @@ pub fn run() {
             update_config_field,
             get_instance_state,
             fetch_remote_instance,
+            ensure_instance,
             launch_instance,
         ])
         .build(tauri::generate_context!())

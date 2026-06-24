@@ -23,6 +23,7 @@ pub enum MinecraftInstallError {
         actual: String,
     },
     Archive(String),
+    Process(String),
     UnsupportedPlatform(String),
 }
 
@@ -63,6 +64,9 @@ impl fmt::Display for MinecraftInstallError {
             ),
             Self::Archive(message) => {
                 write!(f, "Minecraft archive extraction failed: {message}")
+            }
+            Self::Process(message) => {
+                write!(f, "Minecraft installer process failed: {message}")
             }
             Self::UnsupportedPlatform(message) => {
                 write!(f, "unsupported Minecraft install platform: {message}")

@@ -1,18 +1,19 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
-    fmt, fs, io,
+    fmt, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::MinecraftInstallError;
+use crate::instance::ModLoaderType;
 
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
-const INSTANCE_GAME_DIR_NAME: &str = "game";
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +26,15 @@ pub struct LaunchOptions {
     pub extra_jvm_args: Vec<String>,
     #[serde(default)]
     pub extra_game_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchResult {
+    pub pid: u32,
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub log_path: String,
 }
 
 #[derive(Debug)]
@@ -81,16 +91,33 @@ struct LaunchContext {
     game_args: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VersionDetails {
+#[derive(Debug)]
+struct EffectiveVersionDetails {
     id: String,
+    client_jar_version: String,
+    natives_version: String,
     arguments: Option<Arguments>,
-    #[serde(rename = "minecraftArguments")]
     minecraft_arguments: Option<String>,
     main_class: String,
     libraries: Vec<Library>,
     asset_index: AssetIndexRef,
+    java_version: JavaVersion,
+    version_type: Option<String>,
+    include_client_jar: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionDetails {
+    id: String,
+    inherits_from: Option<String>,
+    arguments: Option<Arguments>,
+    #[serde(rename = "minecraftArguments")]
+    minecraft_arguments: Option<String>,
+    main_class: Option<String>,
+    #[serde(default)]
+    libraries: Vec<Library>,
+    asset_index: Option<AssetIndexRef>,
     java_version: Option<JavaVersion>,
     #[serde(rename = "type")]
     version_type: Option<String>,
@@ -168,34 +195,28 @@ struct RuleOs {
     arch: Option<String>,
 }
 
-pub async fn launch_instance(
+pub fn launch_instance(
     manifest: &crate::instance::InstanceManifest,
     options: LaunchOptions,
-) -> Result<u32, MinecraftLaunchError> {
+) -> Result<LaunchResult, MinecraftLaunchError> {
     let context = build_launch_context(manifest, options)?;
-    spawn_minecraft(context)
+    run_minecraft(context)
 }
 
 fn build_launch_context(
     manifest: &crate::instance::InstanceManifest,
     options: LaunchOptions,
 ) -> Result<LaunchContext, MinecraftLaunchError> {
-    let version_details = read_version_details(&manifest.minecraft_version)?;
+    let version_details = read_effective_version_details(manifest)?;
     let data_dir = crate::config::get_config().resolved_data_dir()?;
-    let working_dir = instance_game_dir(&manifest.id)?;
+    let working_dir = super::paths::instance_game_dir(&manifest.id)?;
     fs::create_dir_all(&working_dir)?;
 
-    let java_version = version_details.java_version.as_ref().ok_or_else(|| {
-        MinecraftLaunchError::InvalidManifest(format!(
-            "Minecraft version {} is missing javaVersion",
-            version_details.id
-        ))
-    })?;
-    let runtime_dir = super::java::runtime_dir(java_version.major_version)?;
+    let runtime_dir = super::java::runtime_dir(version_details.java_version.major_version)?;
     let java_path = super::java::executable_path(&runtime_dir);
     require_file(&java_path)?;
 
-    let natives_dir = natives_dir(&data_dir, &version_details.id);
+    let natives_dir = natives_dir(&data_dir, &version_details.natives_version);
     if !natives_dir.is_dir() {
         return Err(MinecraftLaunchError::MissingFile(
             natives_dir.display().to_string(),
@@ -240,15 +261,16 @@ fn build_launch_context(
     })
 }
 
-fn spawn_minecraft(context: LaunchContext) -> Result<u32, MinecraftLaunchError> {
+fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunchError> {
     let log_path = context.working_dir.join("logs").join("launcher-game.log");
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let stdout = fs::OpenOptions::new()
+    let mut stdout = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)?;
+    writeln!(stdout, "\n[SayKOCraft Launcher] Starting Minecraft process")?;
     let stderr = stdout.try_clone()?;
 
     let mut command = Command::new(&context.java_path);
@@ -261,7 +283,7 @@ fn spawn_minecraft(context: LaunchContext) -> Result<u32, MinecraftLaunchError> 
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
 
-    let child = command.spawn()?;
+    let mut child = command.spawn()?;
     let pid = child.id();
     info!(
         pid,
@@ -270,7 +292,23 @@ fn spawn_minecraft(context: LaunchContext) -> Result<u32, MinecraftLaunchError> 
         log = %log_path.display(),
         "Minecraft process started"
     );
-    Ok(pid)
+
+    let status = child.wait()?;
+    let result = LaunchResult {
+        pid,
+        exit_code: status.code(),
+        success: status.success(),
+        log_path: log_path.display().to_string(),
+    };
+
+    info!(
+        pid,
+        exit_code = ?result.exit_code,
+        success = result.success,
+        "Minecraft process exited"
+    );
+
+    Ok(result)
 }
 
 fn read_version_details(version: &str) -> Result<VersionDetails, MinecraftLaunchError> {
@@ -285,19 +323,128 @@ fn read_version_details(version: &str) -> Result<VersionDetails, MinecraftLaunch
     })
 }
 
+fn read_effective_version_details(
+    manifest: &crate::instance::InstanceManifest,
+) -> Result<EffectiveVersionDetails, MinecraftLaunchError> {
+    let launch_version = launch_version_id(manifest)?;
+    let version_details = read_version_details(&launch_version)?;
+
+    if let Some(parent_version) = version_details.inherits_from.clone() {
+        let parent_details = read_version_details(&parent_version)?;
+        merge_version_details(parent_details, version_details)
+    } else {
+        effective_version_from_single(version_details)
+    }
+}
+
+fn launch_version_id(
+    manifest: &crate::instance::InstanceManifest,
+) -> Result<String, MinecraftLaunchError> {
+    match manifest.loader.as_ref().map(|loader| &loader.loader_type) {
+        Some(ModLoaderType::NeoForge) => {
+            let loader = manifest.loader.as_ref().expect("loader checked above");
+            Ok(format!("neoforge-{}", loader.version))
+        }
+        Some(ModLoaderType::Forge | ModLoaderType::Fabric) => Err(
+            MinecraftLaunchError::Validation("unsupported mod loader for launch".to_string()),
+        ),
+        None => Ok(manifest.minecraft_version.clone()),
+    }
+}
+
+fn effective_version_from_single(
+    version_details: VersionDetails,
+) -> Result<EffectiveVersionDetails, MinecraftLaunchError> {
+    let id = version_details.id;
+    let main_class = version_details.main_class.ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {id} is missing mainClass"
+        ))
+    })?;
+    let asset_index = version_details.asset_index.ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {id} is missing assetIndex"
+        ))
+    })?;
+    let java_version = version_details.java_version.ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {id} is missing javaVersion"
+        ))
+    })?;
+
+    Ok(EffectiveVersionDetails {
+        client_jar_version: id.clone(),
+        natives_version: id.clone(),
+        id,
+        arguments: version_details.arguments,
+        minecraft_arguments: version_details.minecraft_arguments,
+        main_class,
+        libraries: version_details.libraries,
+        asset_index,
+        java_version,
+        version_type: version_details.version_type,
+        include_client_jar: true,
+    })
+}
+
+fn merge_version_details(
+    parent: VersionDetails,
+    child: VersionDetails,
+) -> Result<EffectiveVersionDetails, MinecraftLaunchError> {
+    let parent_id = parent.id;
+    let child_id = child.id;
+    let main_class = child.main_class.or(parent.main_class).ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {child_id} and parent {parent_id} are missing mainClass"
+        ))
+    })?;
+    let asset_index = child.asset_index.or(parent.asset_index).ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {child_id} and parent {parent_id} are missing assetIndex"
+        ))
+    })?;
+    let java_version = child.java_version.or(parent.java_version).ok_or_else(|| {
+        MinecraftLaunchError::InvalidManifest(format!(
+            "Minecraft version {child_id} and parent {parent_id} are missing javaVersion"
+        ))
+    })?;
+
+    let mut libraries = parent.libraries;
+    libraries.extend(child.libraries);
+
+    Ok(EffectiveVersionDetails {
+        id: child_id,
+        client_jar_version: parent_id.clone(),
+        natives_version: parent_id,
+        arguments: merge_arguments(parent.arguments, child.arguments),
+        minecraft_arguments: child.minecraft_arguments.or(parent.minecraft_arguments),
+        main_class,
+        libraries,
+        asset_index,
+        java_version,
+        version_type: child.version_type.or(parent.version_type),
+        include_client_jar: false,
+    })
+}
+
+fn merge_arguments(parent: Option<Arguments>, child: Option<Arguments>) -> Option<Arguments> {
+    match (parent, child) {
+        (None, None) => None,
+        (Some(arguments), None) | (None, Some(arguments)) => Some(arguments),
+        (Some(mut parent), Some(child)) => {
+            parent.game.extend(child.game);
+            parent.jvm.extend(child.jvm);
+            Some(parent)
+        }
+    }
+}
+
 fn version_metadata_path(version: &str) -> Result<PathBuf, MinecraftLaunchError> {
     Ok(crate::config::get_config()
         .resolved_data_dir()?
         .join("versions")
         .join(version)
         .join(format!("{version}.json")))
-}
-
-fn instance_game_dir(instance_id: &str) -> Result<PathBuf, MinecraftLaunchError> {
-    Ok(crate::config::get_config()
-        .resolved_install_dir()?
-        .join(instance_id)
-        .join(INSTANCE_GAME_DIR_NAME))
 }
 
 fn require_file(path: &Path) -> Result<(), MinecraftLaunchError> {
@@ -315,9 +462,10 @@ fn require_file(path: &Path) -> Result<(), MinecraftLaunchError> {
 
 fn build_classpath(
     data_dir: &Path,
-    version_details: &VersionDetails,
+    version_details: &EffectiveVersionDetails,
 ) -> Result<Vec<PathBuf>, MinecraftLaunchError> {
     let mut classpath = Vec::new();
+    let mut seen_classpath_entries = HashSet::new();
     let libraries_dir = data_dir.join("libraries");
     let features = HashMap::new();
 
@@ -338,21 +486,47 @@ fn build_classpath(
 
         let path = libraries_dir.join(artifact_path);
         require_file(&path)?;
-        classpath.push(path);
+        push_unique_classpath_entry(&mut classpath, &mut seen_classpath_entries, path);
     }
 
-    let client_jar = data_dir
-        .join("versions")
-        .join(&version_details.id)
-        .join(format!("{}.jar", version_details.id));
-    require_file(&client_jar)?;
-    classpath.push(client_jar);
+    if version_details.id != version_details.client_jar_version {
+        let loader_version_jar = data_dir
+            .join("versions")
+            .join(&version_details.id)
+            .join(format!("{}.jar", version_details.id));
+        if loader_version_jar.is_file() {
+            push_unique_classpath_entry(
+                &mut classpath,
+                &mut seen_classpath_entries,
+                loader_version_jar,
+            );
+        }
+    }
+
+    if version_details.include_client_jar {
+        let client_jar = data_dir
+            .join("versions")
+            .join(&version_details.client_jar_version)
+            .join(format!("{}.jar", version_details.client_jar_version));
+        require_file(&client_jar)?;
+        push_unique_classpath_entry(&mut classpath, &mut seen_classpath_entries, client_jar);
+    }
 
     Ok(classpath)
 }
 
+fn push_unique_classpath_entry(
+    classpath: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    path: PathBuf,
+) {
+    if seen.insert(path.clone()) {
+        classpath.push(path);
+    }
+}
+
 struct LaunchVariablesInput<'a> {
-    version_details: &'a VersionDetails,
+    version_details: &'a EffectiveVersionDetails,
     username: &'a str,
     uuid: &'a str,
     working_dir: &'a Path,
@@ -387,6 +561,10 @@ fn launch_variables(input: LaunchVariablesInput<'_>) -> HashMap<String, String> 
             input.data_dir.join("assets").display().to_string(),
         ),
         (
+            "library_directory".to_string(),
+            input.data_dir.join("libraries").display().to_string(),
+        ),
+        (
             "assets_index_name".to_string(),
             input.version_details.asset_index.id.clone(),
         ),
@@ -408,7 +586,7 @@ fn launch_variables(input: LaunchVariablesInput<'_>) -> HashMap<String, String> 
 }
 
 fn resolve_jvm_arguments(
-    version_details: &VersionDetails,
+    version_details: &EffectiveVersionDetails,
     variables: &HashMap<String, String>,
 ) -> Result<Vec<String>, MinecraftLaunchError> {
     let Some(arguments) = &version_details.arguments else {
@@ -429,7 +607,7 @@ fn resolve_jvm_arguments(
 }
 
 fn resolve_game_arguments(
-    version_details: &VersionDetails,
+    version_details: &EffectiveVersionDetails,
     variables: &HashMap<String, String>,
 ) -> Result<Vec<String>, MinecraftLaunchError> {
     if let Some(arguments) = &version_details.arguments {

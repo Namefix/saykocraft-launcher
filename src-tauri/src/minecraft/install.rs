@@ -1,9 +1,15 @@
-use std::{collections::HashMap, fs, io, path::Path};
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Component, Path, PathBuf},
+};
 
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::{debug, info};
 use zip::ZipArchive;
+
+use crate::instance::{InstanceManifest, ModLoaderType, PackFile, PackFileManifest, UpdatePolicy};
 
 use super::{
     InstallPhase, InstallProgress, InstallProgressSink, MinecraftInstallError, NoopProgressSink,
@@ -109,19 +115,67 @@ struct RuleOs {
     arch: Option<String>,
 }
 
-pub async fn ensure_minecraft_installation(version: &str) -> Result<(), MinecraftInstallError> {
+pub async fn ensure_instance(instance_id: &str) -> Result<(), MinecraftInstallError> {
     let progress = NoopProgressSink;
-    ensure_minecraft_installation_with_progress("minecraft", version, &progress).await
+    let instance = crate::instance::get_instances()
+        .into_iter()
+        .find(|entry| entry.id == instance_id)
+        .and_then(|entry| entry.instance_manifest)
+        .ok_or_else(|| {
+            MinecraftInstallError::Validation(format!("instance is not installed: {instance_id}"))
+        })?;
+
+    ensure_instance_with_progress(&instance, &progress).await
 }
 
-pub async fn ensure_minecraft_installation_with_progress<S>(
-    instance_id: &str,
-    version: &str,
+pub async fn ensure_instance_with_progress<S>(
+    instance: &InstanceManifest,
     progress: &S,
 ) -> Result<(), MinecraftInstallError>
 where
     S: InstallProgressSink + ?Sized,
 {
+    emit_progress(
+        progress,
+        &instance.id,
+        InstallPhase::Preparing,
+        format!("Preparing instance {}", instance.name),
+        0,
+        0,
+        None,
+    );
+
+    let client = Client::new();
+    let java_path = ensure_minecraft_installation(&client, instance, progress).await?;
+    ensure_mod_loader(&client, instance, &java_path, progress).await?;
+    ensure_modpack_files(&client, instance, progress).await?;
+
+    emit_progress(
+        progress,
+        &instance.id,
+        InstallPhase::Done,
+        "Instance is ready",
+        0,
+        0,
+        None,
+    );
+    info!(
+        id = %instance.id,
+        version = %instance.pack_version,
+        "Instance installation is ready"
+    );
+
+    Ok(())
+}
+
+async fn ensure_minecraft_installation(
+    client: &Client,
+    instance: &InstanceManifest,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<PathBuf, MinecraftInstallError> {
+    let version = &instance.minecraft_version;
+    let instance_id = &instance.id;
+
     info!(%version, "Ensuring minecraft installation for version");
     if version.trim().is_empty() {
         return Err(MinecraftInstallError::Validation(
@@ -140,7 +194,6 @@ where
     );
     ensure_installation_app_dir().await?;
 
-    let client = Client::new();
     emit_progress(
         progress,
         instance_id,
@@ -150,32 +203,164 @@ where
         0,
         None,
     );
-    let version_details = fetch_version_details(&client, version).await?;
-    super::java::ensure_runtime(
-        &client,
+    let version_details = fetch_version_details(client, version).await?;
+    let java_path = super::java::ensure_runtime(
+        client,
         &version_details.id,
         version_details.java_version.as_ref(),
         instance_id,
         progress,
     )
     .await?;
-    ensure_client_jar(&client, &version_details, instance_id, progress).await?;
-    ensure_libraries(&client, &version_details, instance_id, progress).await?;
-    ensure_assets(&client, &version_details, instance_id, progress).await?;
-    ensure_native_libraries(&client, &version_details, instance_id, progress).await?;
+    ensure_client_jar(client, &version_details, instance_id, progress).await?;
+    ensure_libraries(client, &version_details, instance_id, progress).await?;
+    ensure_assets(client, &version_details, instance_id, progress).await?;
+    ensure_native_libraries(client, &version_details, instance_id, progress).await?;
 
+    info!(version = %version_details.id, "Minecraft installation is ready");
+
+    Ok(java_path)
+}
+
+async fn ensure_mod_loader(
+    client: &Client,
+    instance: &InstanceManifest,
+    java_path: &Path,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    let Some(loader) = &instance.loader else {
+        return Ok(());
+    };
+
+    match &loader.loader_type {
+        ModLoaderType::NeoForge => {
+            super::neoforge::ensure_loader(client, instance, &loader.version, java_path, progress)
+                .await
+        }
+        ModLoaderType::Forge | ModLoaderType::Fabric => {
+            Err(MinecraftInstallError::Validation(format!(
+                "unsupported mod loader for instance install: {:?}",
+                loader.loader_type
+            )))
+        }
+    }
+}
+
+async fn ensure_modpack_files(
+    client: &Client,
+    instance: &InstanceManifest,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
     emit_progress(
         progress,
-        instance_id,
-        InstallPhase::Done,
-        "Minecraft installation ready",
+        &instance.id,
+        InstallPhase::ModpackFiles,
+        "Fetching modpack file manifest",
         0,
         0,
         None,
     );
-    info!(version = %version_details.id, "Minecraft installation is ready");
+
+    let pack_manifest = crate::instance::fetch_pack_file_manifest(instance).await?;
+    validate_pack_manifest_for_install(instance, &pack_manifest)?;
+
+    let game_dir = super::paths::instance_game_dir(&instance.id)?;
+    fs::create_dir_all(&game_dir)?;
+
+    for file in &pack_manifest.files {
+        ensure_pack_file(client, instance, &game_dir, file, progress).await?;
+    }
+
+    emit_progress(
+        progress,
+        &instance.id,
+        InstallPhase::ModpackFiles,
+        "Modpack files are ready",
+        1,
+        1,
+        None,
+    );
 
     Ok(())
+}
+
+fn validate_pack_manifest_for_install(
+    instance: &InstanceManifest,
+    pack_manifest: &PackFileManifest,
+) -> Result<(), MinecraftInstallError> {
+    if pack_manifest.instance_id != instance.id {
+        return Err(MinecraftInstallError::InvalidManifest(format!(
+            "pack file manifest instance id '{}' does not match '{}'",
+            pack_manifest.instance_id, instance.id
+        )));
+    }
+
+    if pack_manifest.pack_version != instance.pack_version {
+        return Err(MinecraftInstallError::InvalidManifest(format!(
+            "pack file manifest version '{}' does not match '{}'",
+            pack_manifest.pack_version, instance.pack_version
+        )));
+    }
+
+    Ok(())
+}
+
+async fn ensure_pack_file(
+    client: &Client,
+    instance: &InstanceManifest,
+    game_dir: &Path,
+    file: &PackFile,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    let destination = pack_file_destination(game_dir, file)?;
+
+    match &file.update_policy {
+        UpdatePolicy::InstallIfMissing if destination.exists() => {
+            debug!(
+                path = %destination.display(),
+                "Skipping existing install-if-missing pack file"
+            );
+            return Ok(());
+        }
+        UpdatePolicy::InstallIfMissing | UpdatePolicy::Replace => {}
+    }
+
+    download_verified_sha256_file(
+        client,
+        &file.url,
+        &destination,
+        file.size,
+        &file.sha256,
+        DownloadProgress {
+            instance_id: &instance.id,
+            phase: InstallPhase::ModpackFiles,
+            label: format!("Downloading modpack file {}", file.path),
+            current_file: file.path.clone(),
+        },
+        progress,
+    )
+    .await
+}
+
+fn pack_file_destination(
+    game_dir: &Path,
+    file: &PackFile,
+) -> Result<PathBuf, MinecraftInstallError> {
+    if file.path.trim().is_empty() {
+        return Err(MinecraftInstallError::Validation(
+            "pack file path cannot be empty".to_string(),
+        ));
+    }
+
+    let relative_path = Path::new(&file.path);
+    if !is_safe_relative_path(relative_path) {
+        return Err(MinecraftInstallError::Validation(format!(
+            "pack file path is not safe: {}",
+            file.path
+        )));
+    }
+
+    Ok(game_dir.join(relative_path))
 }
 
 pub async fn ensure_installation_app_dir() -> io::Result<()> {
@@ -243,13 +428,17 @@ async fn fetch_version_details(
 }
 
 fn write_version_metadata(version: &str, bytes: &[u8]) -> Result<(), MinecraftInstallError> {
-    let version_dir = crate::config::get_config()
-        .resolved_data_dir()?
-        .join("versions")
-        .join(version);
+    let version_dir = version_dir(version)?;
     fs::create_dir_all(&version_dir)?;
     fs::write(version_dir.join(format!("{version}.json")), bytes)?;
     Ok(())
+}
+
+fn version_dir(version: &str) -> Result<PathBuf, MinecraftInstallError> {
+    Ok(crate::config::get_config()
+        .resolved_data_dir()?
+        .join("versions")
+        .join(version))
 }
 
 async fn ensure_client_jar(
@@ -628,6 +817,98 @@ async fn download_verified_file(
     Ok(())
 }
 
+async fn download_verified_sha256_file(
+    client: &Client,
+    url: &str,
+    destination: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+    progress_info: DownloadProgress<'_>,
+    progress: &(impl InstallProgressSink + ?Sized),
+) -> Result<(), MinecraftInstallError> {
+    if is_existing_file_sha256_valid(destination, expected_size, expected_sha256)? {
+        debug!(path = %destination.display(), "Skipping already valid SHA-256 download");
+        emit_progress(
+            progress,
+            progress_info.instance_id,
+            progress_info.phase,
+            &progress_info.label,
+            expected_size,
+            expected_size,
+            Some(progress_info.current_file.clone()),
+        );
+        return Ok(());
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    emit_progress(
+        progress,
+        progress_info.instance_id,
+        progress_info.phase.clone(),
+        &progress_info.label,
+        0,
+        expected_size,
+        Some(progress_info.current_file.clone()),
+    );
+
+    let response = client.get(url).send().await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(MinecraftInstallError::HttpStatus {
+            url: url.to_string(),
+            status,
+        });
+    }
+
+    let bytes = response.bytes().await?;
+    if bytes.len() as u64 != expected_size {
+        return Err(MinecraftInstallError::Validation(format!(
+            "downloaded file size mismatch for {}: expected {}, got {}",
+            destination.display(),
+            expected_size,
+            bytes.len()
+        )));
+    }
+
+    let actual_sha256 = crate::utils::sha256_hex(&bytes);
+    if !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
+        return Err(MinecraftInstallError::ChecksumMismatch {
+            path: destination.display().to_string(),
+            expected: expected_sha256.to_string(),
+            actual: actual_sha256,
+        });
+    }
+
+    write_downloaded_bytes(destination, &bytes)?;
+
+    emit_progress(
+        progress,
+        progress_info.instance_id,
+        progress_info.phase,
+        &progress_info.label,
+        expected_size,
+        expected_size,
+        Some(progress_info.current_file),
+    );
+    info!(path = %destination.display(), "Downloaded SHA-256 verified file");
+    Ok(())
+}
+
+fn write_downloaded_bytes(destination: &Path, bytes: &[u8]) -> Result<(), MinecraftInstallError> {
+    let partial_destination = crate::utils::partial_path(destination);
+    fs::write(&partial_destination, bytes)?;
+
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    fs::rename(&partial_destination, destination)?;
+
+    Ok(())
+}
+
 fn is_existing_file_valid(
     path: &Path,
     expected_size: u64,
@@ -645,6 +926,25 @@ fn is_existing_file_valid(
 
     let bytes = fs::read(path)?;
     Ok(crate::utils::sha1_matches(&bytes, expected_sha1))
+}
+
+fn is_existing_file_sha256_valid(
+    path: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<bool, MinecraftInstallError> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(MinecraftInstallError::Io(error)),
+    };
+
+    if !metadata.is_file() || metadata.len() != expected_size {
+        return Ok(false);
+    }
+
+    let bytes = fs::read(path)?;
+    Ok(crate::utils::sha256_matches(&bytes, expected_sha256))
 }
 
 fn library_is_allowed(library: &Library) -> bool {
@@ -796,6 +1096,13 @@ fn current_native_platform_dir_name() -> String {
         current_minecraft_os_name(),
         crate::utils::current_arch_name()
     )
+}
+
+fn is_safe_relative_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
 struct DownloadProgress<'a> {
