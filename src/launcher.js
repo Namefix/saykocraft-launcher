@@ -143,8 +143,9 @@ async function actionButtonHandler() {
     let buttonState = await invoke("get_instance_state", {id:"saykocraft-earth"});
 
     switch(Object.values(InstanceState)[buttonState]) {
+        case InstanceState.RequiresUpdate:
         case InstanceState.NotDownloaded: {
-            downloadInstance("saykocraft-earth");
+            ensureInstance("saykocraft-earth");
             break;
         }
         case InstanceState.RequiresUpdate: {
@@ -171,7 +172,7 @@ function setProgressBarPercentage(value) {
     launcherProgressBar.style = `width: ${value}%`;
 }
 
-async function downloadInstance(id) {
+async function ensureInstance(id) {
     console.log("Downloading instance", id);
 
     let result = await invoke("ensure_instance", {id});
@@ -196,8 +197,6 @@ async function setEventListeners() {
     if(tauriEvent?.listen) {
         tauriEvent.listen("instance-install-progress", (event) => {
             const progress = event.payload;
-
-            console.log(progress);
 
             setProgressBarPercentage(progress.overall_percentage ?? 0);
         });
