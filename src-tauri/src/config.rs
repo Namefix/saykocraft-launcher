@@ -250,10 +250,12 @@ pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
     let lock = CONFIG
         .get()
         .ok_or_else(|| "Config not initialized".to_string())?;
+    let previous_config;
     let updated_config = {
         let mut cfg = lock
             .write()
             .map_err(|e| format!("rwlock poisoned: {}", e))?;
+        previous_config = cfg.clone();
 
         match key {
             "install_dir" => match value {
@@ -286,6 +288,11 @@ pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
 
     if let Err(err) = save_config() {
         error!(error = %err, "Config saving failed");
+        let mut cfg = lock
+            .write()
+            .map_err(|e| format!("rwlock poisoned while reverting failed save: {}", e))?;
+        *cfg = previous_config;
+        return Err(format!("Config saving failed: {}", err));
     }
 
     Ok(updated_config)

@@ -70,22 +70,22 @@
                         <span class="settings-title" data-i18n="launcherSettingsTitle">Launcher Settings</span>
                         <div class="setting-div">
                             <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
-                            <input id="config-install_dir" type="text" class="setting-textinput" path-validate>
+                            <input type="text" class="setting-textinput" data-config-key="install_dir" data-path-validate>
                         </div>
                         <div class="setting-div">
                             <span class="setting-title" data-i18n="dataDirectory">Asset Directory</span>
-                            <input id="config-data_dir" type="text" class="setting-textinput" path-validate>
+                            <input type="text" class="setting-textinput" data-config-key="data_dir" data-path-validate>
                         </div>
                         <div class="setting-div">
                             <span class="setting-title" data-i18n="keepLauncherOpen">Keep Launcher Open</span>
                             <label class="switch setting-checkbox">
-                                <input id="config-keep_launcher_open" type="checkbox">
+                                <input type="checkbox" data-config-key="keep_launcher_open">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="setting-div">
                             <span class="setting-title" data-i18n="language">Language</span>
-                            <select name="language" id="config-language">
+                            <select name="language" data-config-key="language">
                                 <option value="en-US" data-i18n="language.englishUS">English (US)</option>
                                 <option value="tr-TR" data-i18n="language.turkish">Türkçe</option>
                             </select>
