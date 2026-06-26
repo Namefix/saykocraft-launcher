@@ -2,13 +2,14 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     fmt, fs, io,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{OnceLock, RwLock},
     time::Duration,
 };
 
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
@@ -16,6 +17,7 @@ const CDN_URL: &str = "http://localhost:3001";
 const INSTANCE_STATE_CHANGED_EVENT: &str = "instance-state-changed";
 
 const INSTANCE_MANIFEST_FILE: &str = "instance.json";
+const INSTANCE_SETTINGS_FILE: &str = "instance-settings.json";
 const REMOTE_INSTANCE_IDS: &[&str] = &["saykocraft-earth"];
 const REMOTE_INSTANCE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const SUPPORTED_INSTANCE_SCHEMA_VERSION: u32 = 0;
@@ -84,6 +86,13 @@ pub struct InstanceEntry {
     pub id: String,
     pub state: InstanceState,
     pub instance_manifest: Option<InstanceManifest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceSettings {
+    #[serde(alias = "preferred_ram_mb")]
+    pub maximum_ram_mb: u64,
+    pub additional_jvm_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -310,6 +319,155 @@ fn write_instance_manifest(path: &Path, instance: &InstanceManifest) -> io::Resu
     Ok(())
 }
 
+fn default_instance_settings(instance: &InstanceManifest) -> InstanceSettings {
+    InstanceSettings {
+        maximum_ram_mb: instance
+            .recommended_ram_mb
+            .max(instance.minimum_ram_mb)
+            .max(1),
+        additional_jvm_args: Vec::new(),
+    }
+}
+
+fn settings_validation_error(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn instance_settings_path(instance_dir: &Path) -> PathBuf {
+    instance_dir.join(INSTANCE_SETTINGS_FILE)
+}
+
+fn validate_instance_settings(
+    settings: &InstanceSettings,
+    instance: &InstanceManifest,
+) -> Result<(), String> {
+    if settings.maximum_ram_mb == 0 {
+        return Err("maximum RAM must be greater than zero".to_string());
+    }
+
+    if settings.maximum_ram_mb < instance.minimum_ram_mb {
+        return Err(format!(
+            "maximum RAM cannot be lower than the instance minimum of {} MB",
+            instance.minimum_ram_mb
+        ));
+    }
+
+    validate_jvm_args(&settings.additional_jvm_args)?;
+
+    Ok(())
+}
+
+fn validate_jvm_args(args: &[String]) -> Result<(), String> {
+    for arg in args {
+        if arg.chars().any(char::is_control) {
+            return Err("additional JVM arguments cannot contain control characters".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_jvm_args(args: Vec<String>) -> Vec<String> {
+    args.into_iter()
+        .map(|arg| arg.trim().to_string())
+        .filter(|arg| !arg.is_empty())
+        .collect()
+}
+
+fn parse_jvm_args(value: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+
+    for character in value.chars() {
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+
+        if character == '"' || character == '\'' {
+            quote = Some(character);
+            continue;
+        }
+
+        if character.is_whitespace() {
+            if !current.is_empty() {
+                args.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+
+        current.push(character);
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
+}
+
+fn read_instance_settings_file(
+    path: &Path,
+    instance: &InstanceManifest,
+) -> io::Result<InstanceSettings> {
+    let data = fs::read(path)?;
+    let mut settings = serde_json::from_slice::<InstanceSettings>(&data).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("failed to parse instance settings: {error}"),
+        )
+    })?;
+
+    settings.additional_jvm_args = normalize_jvm_args(settings.additional_jvm_args);
+    validate_instance_settings(&settings, instance).map_err(settings_validation_error)?;
+
+    Ok(settings)
+}
+
+fn write_instance_settings_file(path: &Path, settings: &InstanceSettings) -> io::Result<()> {
+    let content = serde_json::to_string_pretty(settings).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to serialize instance settings: {error}"),
+        )
+    })?;
+
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, path)?;
+    debug!(path = %path.display(), "Written instance settings");
+
+    Ok(())
+}
+
+fn ensure_instance_settings_file(
+    instance_dir: &Path,
+    instance: &InstanceManifest,
+) -> io::Result<()> {
+    let settings_path = instance_settings_path(instance_dir);
+
+    if settings_path.exists() {
+        return Ok(());
+    }
+
+    let settings = default_instance_settings(instance);
+    validate_instance_settings(&settings, instance).map_err(settings_validation_error)?;
+    write_instance_settings_file(&settings_path, &settings)
+}
+
+fn read_or_create_instance_settings(
+    instance_dir: &Path,
+    instance: &InstanceManifest,
+) -> io::Result<InstanceSettings> {
+    ensure_instance_settings_file(instance_dir, instance)?;
+    read_instance_settings_file(&instance_settings_path(instance_dir), instance)
+}
+
 pub async fn fetch_pack_file_manifest(instance: &InstanceManifest) -> io::Result<PackFileManifest> {
     let client = Client::builder()
         .timeout(REMOTE_INSTANCE_REQUEST_TIMEOUT)
@@ -402,6 +560,93 @@ pub fn get_instances() -> Vec<InstanceEntry> {
         .read()
         .expect("rwlock poisoned")
         .clone()
+}
+
+pub fn get_instance_manifest(id: &str) -> Option<InstanceManifest> {
+    get_instances()
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.instance_manifest)
+}
+
+pub fn installed_instance_dir(id: &str) -> io::Result<PathBuf> {
+    let manifest = get_instance_manifest(id).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Instance '{id}' is not installed"),
+        )
+    })?;
+
+    let instance_dir = crate::config::get_config()
+        .resolved_install_dir()?
+        .join(&manifest.id);
+
+    if !instance_dir.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Instance folder does not exist: {}", instance_dir.display()),
+        ));
+    }
+
+    Ok(instance_dir)
+}
+
+pub fn get_instance_settings(id: &str) -> io::Result<InstanceSettings> {
+    let manifest = get_instance_manifest(id).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Instance '{id}' is not installed"),
+        )
+    })?;
+    let instance_dir = installed_instance_dir(id)?;
+
+    read_or_create_instance_settings(&instance_dir, &manifest)
+}
+
+fn jvm_args_from_value(value: Value) -> Result<Vec<String>, String> {
+    let args = match value {
+        Value::Array(values) => values
+            .into_iter()
+            .map(|value| match value {
+                Value::String(arg) => Ok(arg),
+                _ => Err("additional_jvm_args must be an array of strings".to_string()),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Value::String(value) => parse_jvm_args(&value),
+        _ => return Err("additional_jvm_args must be an array of strings".to_string()),
+    };
+
+    Ok(normalize_jvm_args(args))
+}
+
+pub fn update_instance_settings_field(
+    id: &str,
+    key: &str,
+    value: Value,
+) -> Result<InstanceSettings, String> {
+    let manifest =
+        get_instance_manifest(id).ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+    let instance_dir = installed_instance_dir(id).map_err(|error| error.to_string())?;
+    let mut settings = read_or_create_instance_settings(&instance_dir, &manifest)
+        .map_err(|error| error.to_string())?;
+
+    match key {
+        "maximum_ram_mb" => {
+            settings.maximum_ram_mb = value
+                .as_u64()
+                .ok_or_else(|| "maximum_ram_mb must be an unsigned integer".to_string())?;
+        }
+        "additional_jvm_args" => {
+            settings.additional_jvm_args = jvm_args_from_value(value)?;
+        }
+        _ => return Err(format!("Unknown instance settings key: {key}")),
+    }
+
+    validate_instance_settings(&settings, &manifest)?;
+    write_instance_settings_file(&instance_settings_path(&instance_dir), &settings)
+        .map_err(|error| error.to_string())?;
+
+    Ok(settings)
 }
 
 async fn get_remote_instance(instance_id: &str) -> Result<InstanceManifest, RemoteInstanceError> {
@@ -620,6 +865,7 @@ pub async fn fetch_remote_instance(instance_id: &str) -> io::Result<()> {
 
     fs::create_dir_all(&instance_dir)?;
     write_instance_manifest(&manifest_path, &instance)?;
+    ensure_instance_settings_file(&instance_dir, &instance)?;
     validate_instance_manifest(&instance_dir, &instance)?;
 
     info!(id = %instance.id, version = %instance.pack_version, "Fetched remote instance manifest");

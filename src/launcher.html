@@ -106,12 +106,27 @@
                         </div>
 
                         <div class="setting-div">
-                            <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
-                            <div>
-                                <input type="text" class="setting-textinput" disabled>
-                                <button class="setting-button" onclick="browseInstance('saykocraft-earth')" data-i18n="pathBrowse">Browse</button>
+                            <span class="setting-title" data-i18n="instanceLocation">Instance Location</span>
+                            <div class="setting-inline">
+                                <input id="modpack-location" type="text" class="setting-textinput" disabled>
+                                <button class="setting-button" onclick="browseInstance(ACTIVE_INSTANCE_ID)" data-i18n="pathBrowse">Browse</button>
                                 <span id="modpack-filesize" class="setting-installdir-filesize">Calculating...</span>
                             </div>
+                            <div class="modpacksettings-actionbutton-div">
+                                <button class="modpacksettings-actionbutton danger" data-i18n="action.remove">Remove</button>
+                                <button class="modpacksettings-actionbutton" data-i18n="action.changeVersion">Change Version</button>
+                                <button class="modpacksettings-actionbutton" data-i18n="action.repair">Repair</button>
+                            </div>
+                        </div>
+
+                        <div class="setting-div">
+                            <span class="setting-title" data-i18n="maximumRam">Maximum RAM (MB)</span>
+                            <input type="number" class="setting-textinput raminput" min="512" step="256" data-instance-config-key="maximum_ram_mb">
+                        </div>
+
+                        <div class="setting-div">
+                            <span class="setting-title" data-i18n="additionalJvmArguments">Additional JVM Arguments</span>
+                            <textarea class="setting-textarea" spellcheck="false" data-instance-config-key="additional_jvm_args"></textarea>
                         </div>
                     </div>
                 </div>

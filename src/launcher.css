@@ -358,6 +358,11 @@ body {
     gap: 8px;
 }
 
+.setting-inline {
+    display: flex;
+    align-items: center;
+}
+
 .setting-title {
     color: #ffffff;
     font-size: 24px;
@@ -368,8 +373,22 @@ body {
     width: 284px;
     height: 38px;
     border-radius: 6px;
-    font-size: 18;
+    font-size: 18px;
     color: #c6c6c6;
+}
+
+.setting-textinput.raminput {
+    width: 96px;
+    height: 40px;
+    text-align: center;
+    padding: 0
+}
+
+.setting-textarea {
+    max-width: 512px;
+    max-height: 256px;
+    min-width: 256px;
+    min-height: 64px;
 }
 
 .setting-button {
@@ -427,6 +446,30 @@ body {
 
 .logout-button:hover {
     opacity: 0.8;
+}
+
+/*  4. MODPACK SETTINGS */
+
+.modpacksettings-actionbuttons {
+    margin-top: 16px;
+}
+
+.modpacksettings-actionbutton {
+    width: max-content;
+    height: 40px;
+    padding: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    margin-right: 8px;
+
+    font-size: 18px;
+    background-color: #2B2B2B;
+    border-color: #3F3F3F;
+}
+
+.modpacksettings-actionbutton.danger {
+    background-color: #A12121;
+    border-color: #DF2121;
 }
 
 .centerDiv .loading-bar {

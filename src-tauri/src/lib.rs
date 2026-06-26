@@ -6,11 +6,9 @@ mod profile_icon;
 mod utils;
 
 use keyring_core::{Entry, Error as KeyringError};
+use serde::Serialize;
 use serde_json::Value;
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{fs, io, path::Path};
 use tauri::{AppHandle, Emitter, LogicalSize, RunEvent, Size};
 use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
@@ -20,6 +18,14 @@ use tracing_subscriber::{fmt, EnvFilter};
 use auth::AuthError;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Serialize)]
+struct InstanceSettingsResponse {
+    settings: instance::InstanceSettings,
+    instance_location: String,
+    minimum_ram_mb: u64,
+    recommended_ram_mb: u64,
+}
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -204,41 +210,46 @@ async fn get_instance_version(id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_instance_settings(id: String) -> Result<InstanceSettingsResponse, String> {
+    let manifest = instance::get_instance_manifest(&id)
+        .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+    let settings = instance::get_instance_settings(&id).map_err(|e| e.to_string())?;
+    let instance_location = instance::installed_instance_dir(&id)
+        .map_err(|e| e.to_string())?
+        .display()
+        .to_string();
+
+    Ok(InstanceSettingsResponse {
+        settings,
+        instance_location,
+        minimum_ram_mb: manifest.minimum_ram_mb,
+        recommended_ram_mb: manifest.recommended_ram_mb,
+    })
+}
+
+#[tauri::command]
+async fn update_instance_settings_field(
+    id: String,
+    key: String,
+    value: Value,
+) -> Result<instance::InstanceSettings, String> {
+    instance::update_instance_settings_field(&id, &key, value)
+}
+
+#[tauri::command]
 async fn browse_instance(id: String) -> Result<(), String> {
-    let instance_dir = installed_instance_dir(&id)?;
+    let instance_dir = instance::installed_instance_dir(&id).map_err(|e| e.to_string())?;
     tauri_plugin_opener::open_path(&instance_dir, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn get_instance_folder_size(id: String) -> Result<u64, String> {
-    let instance_dir = installed_instance_dir(&id)?;
+    let instance_dir = instance::installed_instance_dir(&id).map_err(|e| e.to_string())?;
 
     tauri::async_runtime::spawn_blocking(move || folder_size(&instance_dir))
         .await
         .map_err(|error| format!("Instance folder size task failed: {error}"))?
         .map_err(|error| error.to_string())
-}
-
-fn installed_instance_dir(id: &str) -> Result<PathBuf, String> {
-    let instance_id = instance::get_instances()
-        .into_iter()
-        .find(|entry| entry.id == id && entry.instance_manifest.is_some())
-        .map(|entry| entry.id)
-        .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
-
-    let instance_dir = config::get_config()
-        .resolved_install_dir()
-        .map_err(|e| e.to_string())?
-        .join(&instance_id);
-
-    if !instance_dir.is_dir() {
-        return Err(format!(
-            "Instance folder does not exist: {}",
-            instance_dir.display()
-        ));
-    }
-
-    Ok(instance_dir)
 }
 
 fn folder_size(path: &Path) -> io::Result<u64> {
@@ -302,12 +313,17 @@ async fn launch_instance(
     id: String,
     options: Option<minecraft::LaunchOptions>,
 ) -> Result<minecraft::LaunchResult, String> {
-    let manifest = instance::get_instances()
-        .into_iter()
-        .find(|entry| entry.id == id)
-        .and_then(|entry| entry.instance_manifest)
+    let manifest = instance::get_instance_manifest(&id)
         .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+    let instance_settings = instance::get_instance_settings(&id).map_err(|e| e.to_string())?;
     let mut options = options.unwrap_or_default();
+    if options.max_memory_mb.is_none() {
+        options.max_memory_mb = Some(instance_settings.maximum_ram_mb);
+    }
+    let mut extra_jvm_args = instance_settings.additional_jvm_args;
+    extra_jvm_args.extend(options.extra_jvm_args);
+    options.extra_jvm_args = extra_jvm_args;
+
     if options
         .username
         .as_deref()
@@ -411,6 +427,8 @@ pub fn run() {
             update_config_field,
             get_instance_state,
             get_instance_version,
+            get_instance_settings,
+            update_instance_settings_field,
             browse_instance,
             get_instance_folder_size,
             fetch_remote_instance,
