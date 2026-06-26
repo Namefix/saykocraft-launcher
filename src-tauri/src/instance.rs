@@ -2,7 +2,7 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     fmt, fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{OnceLock, RwLock},
     time::Duration,
 };
@@ -202,7 +202,7 @@ fn replace_instances(instances: Vec<InstanceEntry>) -> io::Result<()> {
         .write()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
 
-    let changed_instance_ids = instances
+    let mut changed_instance_ids = instances
         .iter()
         .filter(|instance| {
             cached_instances
@@ -212,6 +212,15 @@ fn replace_instances(instances: Vec<InstanceEntry>) -> io::Result<()> {
         })
         .map(|instance| instance.id.clone())
         .collect::<Vec<_>>();
+
+    changed_instance_ids.extend(
+        cached_instances
+            .iter()
+            .filter(|cached| !instances.iter().any(|instance| instance.id == cached.id))
+            .map(|cached| cached.id.clone()),
+    );
+    changed_instance_ids.sort();
+    changed_instance_ids.dedup();
 
     let instance_count = instances.len();
     *cached_instances = instances;
@@ -282,9 +291,7 @@ fn validate_instance_fields(instance: &InstanceManifest) -> Result<(), String> {
         ));
     }
 
-    if instance.id.trim().is_empty() {
-        return Err("instance id cannot be empty".to_string());
-    }
+    validate_instance_id_path_component(&instance.id)?;
 
     if instance.minimum_ram_mb > instance.recommended_ram_mb {
         return Err("minimum RAM cannot be greater than recommended RAM".to_string());
@@ -335,6 +342,40 @@ fn settings_validation_error(message: String) -> io::Error {
 
 fn instance_settings_path(instance_dir: &Path) -> PathBuf {
     instance_dir.join(INSTANCE_SETTINGS_FILE)
+}
+
+pub(crate) fn local_instance_dir(id: &str) -> io::Result<PathBuf> {
+    validate_instance_id_path_component(id).map_err(instance_id_validation_io_error)?;
+
+    Ok(crate::config::get_config().resolved_install_dir()?.join(id))
+}
+
+fn validate_instance_id_path_component(id: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("instance id cannot be empty".to_string());
+    }
+
+    if id.trim() != id {
+        return Err("instance id cannot start or end with whitespace".to_string());
+    }
+
+    if id.contains('/') || id.contains('\\') {
+        return Err("instance id must not contain path separators".to_string());
+    }
+
+    if id.chars().any(char::is_control) {
+        return Err("instance id cannot contain control characters".to_string());
+    }
+
+    let mut components = Path::new(id).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => Err("instance id must be a single folder name".to_string()),
+    }
+}
+
+fn instance_id_validation_io_error(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
 fn validate_instance_settings(
@@ -577,9 +618,7 @@ pub fn installed_instance_dir(id: &str) -> io::Result<PathBuf> {
         )
     })?;
 
-    let instance_dir = crate::config::get_config()
-        .resolved_install_dir()?
-        .join(&manifest.id);
+    let instance_dir = local_instance_dir(&manifest.id)?;
 
     if !instance_dir.is_dir() {
         return Err(io::Error::new(
@@ -601,6 +640,86 @@ pub fn get_instance_settings(id: &str) -> io::Result<InstanceSettings> {
     let instance_dir = installed_instance_dir(id)?;
 
     read_or_create_instance_settings(&instance_dir, &manifest)
+}
+
+pub fn remove_local_instance(id: &str) -> io::Result<bool> {
+    ensure_instance_can_be_removed(id)?;
+
+    let instance_dir = local_instance_dir(id)?;
+    let removed = remove_local_instance_dir(&instance_dir)?;
+    mark_instance_removed(id)?;
+
+    if removed {
+        info!(id, path = %instance_dir.display(), "Removed local instance");
+    } else {
+        debug!(id, path = %instance_dir.display(), "Local instance was already absent");
+    }
+
+    Ok(removed)
+}
+
+fn ensure_instance_can_be_removed(id: &str) -> io::Result<()> {
+    validate_instance_id_path_component(id).map_err(instance_id_validation_io_error)?;
+
+    match get_instance_state(id) {
+        InstanceState::Downloading | InstanceState::Updating | InstanceState::Launched => {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("cannot remove instance '{id}' while it is active"),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn remove_local_instance_dir(instance_dir: &Path) -> io::Result<bool> {
+    let metadata = match fs::symlink_metadata(instance_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "refusing to remove symlinked instance path: {}",
+                instance_dir.display()
+            ),
+        ));
+    }
+
+    if !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "instance path is not a directory: {}",
+                instance_dir.display()
+            ),
+        ));
+    }
+
+    fs::remove_dir_all(instance_dir)?;
+    Ok(true)
+}
+
+fn mark_instance_removed(id: &str) -> io::Result<()> {
+    let _ = remove_instance_state_override(id)?;
+
+    let mut instances = get_instances()
+        .into_iter()
+        .filter(|entry| entry.id != id)
+        .collect::<Vec<_>>();
+
+    if is_remote_instance_id(id) {
+        instances.push(empty_instance_entry(id, InstanceState::NotDownloaded));
+    }
+
+    replace_instances(instances)
+}
+
+fn is_remote_instance_id(id: &str) -> bool {
+    REMOTE_INSTANCE_IDS.contains(&id)
 }
 
 fn jvm_args_from_value(value: Value) -> Result<Vec<String>, String> {
@@ -819,19 +938,22 @@ pub fn set_instance_state_override(id: &str, state: InstanceState) -> io::Result
 }
 
 pub fn clear_instance_state_override(id: &str) -> io::Result<()> {
-    let states = INSTANCE_STATE_OVERRIDES.get_or_init(|| RwLock::new(HashMap::new()));
-    let mut states = states
-        .write()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
-
-    let removed_state = states.remove(id);
-    drop(states);
+    let removed_state = remove_instance_state_override(id)?;
 
     if removed_state.is_some() {
         emit_instance_state_changed(id, get_instance_state(id));
     }
 
     Ok(())
+}
+
+fn remove_instance_state_override(id: &str) -> io::Result<Option<InstanceState>> {
+    let states = INSTANCE_STATE_OVERRIDES.get_or_init(|| RwLock::new(HashMap::new()));
+    let mut states = states
+        .write()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("rwlock poisoned: {e}")))?;
+
+    Ok(states.remove(id))
 }
 
 fn emit_instance_state_changed(id: &str, state: InstanceState) {
@@ -855,12 +977,10 @@ fn remote_instance_error_to_io(error: RemoteInstanceError) -> io::Error {
 }
 
 pub async fn fetch_remote_instance(instance_id: &str) -> io::Result<()> {
-    let install_dir = crate::config::get_config().resolved_install_dir()?;
-
     let instance = get_remote_instance(instance_id)
         .await
         .map_err(remote_instance_error_to_io)?;
-    let instance_dir = install_dir.join(&instance.id);
+    let instance_dir = local_instance_dir(&instance.id)?;
     let manifest_path = instance_dir.join(INSTANCE_MANIFEST_FILE);
 
     fs::create_dir_all(&instance_dir)?;

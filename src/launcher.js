@@ -241,7 +241,7 @@ function setProgressBarPercentage(value) {
     launcherProgressBar.style = `width: ${value}%`;
 }
 
-async function ensureInstance(id) {
+async function ensureInstance(id="saykocraft-earth") {
     console.log("Downloading instance", id);
 
     let result = await invoke("ensure_instance", {id});
@@ -273,6 +273,14 @@ async function browseInstance(id) {
     } catch (err) {
         console.error("Failed to browse instance.", err);
     }
+}
+
+async function removeInstance(id="saykocraft-earth") {
+    console.log("Removing instance", id);
+
+    let result = await invoke("remove_instance", {id});
+    setLauncherView(LauncherView.MAIN);
+    console.log("Instance removed", result);
 }
 
 async function setEventListeners() {

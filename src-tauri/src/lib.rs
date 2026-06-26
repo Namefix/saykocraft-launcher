@@ -252,6 +252,14 @@ async fn get_instance_folder_size(id: String) -> Result<u64, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn remove_instance(id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || instance::remove_local_instance(&id))
+        .await
+        .map_err(|error| format!("Instance remove task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 fn folder_size(path: &Path) -> io::Result<u64> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.is_file() {
@@ -431,6 +439,7 @@ pub fn run() {
             update_instance_settings_field,
             browse_instance,
             get_instance_folder_size,
+            remove_instance,
             fetch_remote_instance,
             ensure_instance,
             launch_instance,
