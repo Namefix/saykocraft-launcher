@@ -7,11 +7,15 @@ let lastSelectedServer = document.querySelector(".serverlist .server.selected") 
 
 const modpackActionButton = document.getElementById("modpack-actionbutton");
 const modpackActionButtonLabel = document.getElementById("modpack-actionbutton-label");
+const modpackSettingsButton = document.getElementById("modpack-settingsbutton");
+const modpackSettingsBackButton = document.getElementById("modpacksettings-back");
 
 const launcherProgressBar = document.getElementById("launcher-progressbar");
 const launcherLoadingBar = document.getElementById("launcher-loadingbar");
 
 const launcherSettingsVersionText = document.getElementById("sayko-launcherversion");
+const modpackVersionText = document.getElementById("modpack-version");
+const modpackFileSizeText = document.getElementById("modpack-filesize");
 
 const LauncherView = Object.freeze({
     MAIN: "MAIN",
@@ -21,6 +25,19 @@ const LauncherView = Object.freeze({
 
 launcherSettingsButton?.addEventListener("click", () => {
     setLauncherView(LauncherView.LAUNCHER_SETTINGS);
+});
+
+modpackSettingsButton?.addEventListener("click", async () => {
+    let instanceState = await invoke("get_instance_state", {id:"saykocraft-earth"});
+    let state = Object.values(InstanceState)[instanceState];
+
+    if(state === InstanceState.Ready || state === InstanceState.RequiresUpdate) {
+        setLauncherView(LauncherView.MODPACK_SETTINGS);
+    }
+});
+
+modpackSettingsBackButton?.addEventListener("click", () => {
+    setLauncherView(LauncherView.MAIN);
 });
 
 serverButtons.forEach((server) => {
@@ -91,37 +108,68 @@ async function setLauncherVersion() {
     let version = await invoke("get_launcher_version");
     launcherSettingsVersionText.textContent = `saykocraft-launcher v${version}`
 }
-async function setModpackButton() {
+async function setModpackVersion() {
+    try {
+        let version = await invoke("get_instance_version", {id:"saykocraft-earth"});
+        modpackVersionText.textContent = `v${version}`;
+    } catch (err) {
+        console.error("Failed to fetch modpack version.", err);
+        modpackVersionText.textContent = "";
+    }
+}
+async function setModpackFileSize() {
+    if (!modpackFileSizeText) {
+        return;
+    }
+
+    modpackFileSizeText.textContent = t("filesize.calculating");
+
+    try {
+        let bytes = await invoke("get_instance_folder_size", {id:"saykocraft-earth"});
+        modpackFileSizeText.textContent = formatFileSize(bytes);
+    } catch (err) {
+        console.error("Failed to calculate modpack file size.", err);
+        modpackFileSizeText.textContent = t("filesize.unavailable");
+    }
+}
+async function setModpackButtons() {
     let buttonState = await invoke("get_instance_state", {id:"saykocraft-earth"});
 
     switch(Object.values(InstanceState)[buttonState]) {
         case InstanceState.Unknown:
         case InstanceState.Broken: {
             setActionButtonState(null, t("action.broken"), true);
+            setModpackSettingsButtonState(false);
             break;
         }
         case InstanceState.RequiresUpdate: {
             setActionButtonState("update", t("action.update"));
+            setModpackSettingsButtonState(false);
             break;
         }
         case InstanceState.Updating: {
             setActionButtonState("update", t("action.updating"), true);
+            setModpackSettingsButtonState(false);
             break;
         }
         case InstanceState.Ready: {
             setActionButtonState("start", t("action.start"));
+            setModpackSettingsButtonState(false);
             break;
         }
         case InstanceState.Launched: {
             setActionButtonState("stop", t("action.stop"));
+            setModpackSettingsButtonState(true);
             break;
         }
         case InstanceState.NotDownloaded: {
             setActionButtonState("download", t("action.download"));
+            setModpackSettingsButtonState(true);
             break;
         }
         case InstanceState.Downloading: {
             setActionButtonState("download", t("action.downloading"), true);
+            setModpackSettingsButtonState(false);
             break;
         }
     }
@@ -137,6 +185,28 @@ function setActionButtonState(classname, labeltext, disabled=false) {
     if(classname) modpackActionButton.classList.add(classname);
     if(disabled) modpackActionButton.classList.add("disabled");
     modpackActionButtonLabel.textContent = labeltext;
+}
+
+function setModpackSettingsButtonState(disabled, warning=false) {
+    modpackSettingsButton.classList.remove("disabled");
+    modpackSettingsButton.classList.remove("warning");
+
+    if(disabled) modpackSettingsButton.classList.add("disabled");
+    if(warning) modpackSettingsButton.classList.add("warning");
+}
+
+function formatFileSize(bytes) {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = Number(bytes);
+    let unitIndex = 0;
+
+    while(size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+
+    let maximumFractionDigits = unitIndex === 0 ? 0 : 1;
+    return `${size.toLocaleString(undefined, { maximumFractionDigits })} ${units[unitIndex]}`;
 }
 
 async function actionButtonHandler() {
@@ -178,6 +248,7 @@ async function ensureInstance(id) {
     let result = await invoke("ensure_instance", {id});
     console.log("Instance downloaded result", result);
     setProgressBarPercentage(0);
+    setModpackFileSize();
 }
 
 async function startInstance(id) {
@@ -193,6 +264,16 @@ async function stopInstance(id) {
     await invoke("stop_instance", {id});
 }
 
+async function browseInstance(id) {
+    console.log("Browsing instance", id);
+
+    try {
+        await invoke("browse_instance", {id});
+    } catch (err) {
+        console.error("Failed to browse instance.", err);
+    }
+}
+
 async function setEventListeners() {
     if(tauriEvent?.listen) {
         tauriEvent.listen("instance-install-progress", (event) => {
@@ -203,7 +284,8 @@ async function setEventListeners() {
 
         tauriEvent.listen("instance-state-changed", (event) => {
             const { id, state, stateCode } = event.payload;
-            setModpackButton();
+            setModpackButtons();
+            setModpackFileSize();
         });
     }
 }
@@ -214,8 +296,10 @@ async function initializeLauncher() {
     setUsername();
     setProfileIcon();
     setLauncherVersion();
+    setModpackVersion();
+    setModpackFileSize();
     setLauncherView(LauncherView.MAIN);
-    setModpackButton();
+    setModpackButtons();
     setEventListeners();
 }
 

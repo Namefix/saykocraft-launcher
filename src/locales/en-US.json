@@ -35,5 +35,9 @@
   "server.comingSoon": "Coming Soon",
   "launcherSettings": "Launcher settings",
   "modpackSettings": "Modpack settings",
-  "modpackAction": "Modpack action"
+  "modpackAction": "Modpack action",
+  "modpackSettingsTitle": "SayKOCraft Earth Settings",
+  "pathBrowse": "Browse",
+  "filesize.calculating": "Calculating...",
+  "filesize.unavailable": "Unavailable"
 }

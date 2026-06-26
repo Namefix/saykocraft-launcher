@@ -7,6 +7,10 @@ mod utils;
 
 use keyring_core::{Entry, Error as KeyringError};
 use serde_json::Value;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 use tauri::{AppHandle, Emitter, LogicalSize, RunEvent, Size};
 use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
@@ -187,6 +191,78 @@ async fn get_instance_state(id: String) -> u8 {
 }
 
 #[tauri::command]
+async fn get_instance_version(id: String) -> Result<String, String> {
+    instance::get_instances()
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| {
+            entry
+                .instance_manifest
+                .map(|manifest| manifest.pack_version)
+        })
+        .ok_or_else(|| format!("Instance '{id}' was not found"))
+}
+
+#[tauri::command]
+async fn browse_instance(id: String) -> Result<(), String> {
+    let instance_dir = installed_instance_dir(&id)?;
+    tauri_plugin_opener::open_path(&instance_dir, None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_instance_folder_size(id: String) -> Result<u64, String> {
+    let instance_dir = installed_instance_dir(&id)?;
+
+    tauri::async_runtime::spawn_blocking(move || folder_size(&instance_dir))
+        .await
+        .map_err(|error| format!("Instance folder size task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+fn installed_instance_dir(id: &str) -> Result<PathBuf, String> {
+    let instance_id = instance::get_instances()
+        .into_iter()
+        .find(|entry| entry.id == id && entry.instance_manifest.is_some())
+        .map(|entry| entry.id)
+        .ok_or_else(|| format!("Instance '{id}' is not installed"))?;
+
+    let instance_dir = config::get_config()
+        .resolved_install_dir()
+        .map_err(|e| e.to_string())?
+        .join(&instance_id);
+
+    if !instance_dir.is_dir() {
+        return Err(format!(
+            "Instance folder does not exist: {}",
+            instance_dir.display()
+        ));
+    }
+
+    Ok(instance_dir)
+}
+
+fn folder_size(path: &Path) -> io::Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+
+    let mut size = 0;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.path().symlink_metadata()?;
+
+        if metadata.is_dir() {
+            size += folder_size(&entry.path())?;
+        } else if metadata.is_file() {
+            size += metadata.len();
+        }
+    }
+
+    Ok(size)
+}
+
+#[tauri::command]
 async fn fetch_remote_instance(id: String) -> Result<(), String> {
     instance::fetch_remote_instance(&id)
         .await
@@ -334,6 +410,9 @@ pub fn run() {
             save_config,
             update_config_field,
             get_instance_state,
+            get_instance_version,
+            browse_instance,
+            get_instance_folder_size,
             fetch_remote_instance,
             ensure_instance,
             launch_instance,

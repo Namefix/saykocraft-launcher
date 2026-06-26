@@ -219,7 +219,7 @@ body {
 }
 
 .centerDiv .button-action:hover:not(.disabled) {
-    opacity: 0.8;
+    opacity: 0.9;
 }
 
 .button-action.start {
@@ -275,6 +275,16 @@ body {
     cursor: pointer;
 }
 
+.button-pack-settings.disabled {
+    opacity: 0.7;
+    cursor: not-allowed !important;
+}
+
+.button-pack-settings.disabled .icon-settings {
+    opacity: 0.7;
+    cursor: not-allowed !important;
+}
+
 .button-pack-settings.warning::before { /* BADGE */
     content: '';
     position: absolute;
@@ -300,7 +310,7 @@ body {
     transition: transform 0.3s ease-in-out, opacity 0.1s, color 0.1s;
 }
 
-.button-pack-settings:hover .icon-settings {
+.button-pack-settings:not(.disabled):hover .icon-settings {
     opacity: 0.9;
     transform: rotateZ(180deg);
 }
@@ -317,11 +327,29 @@ body {
     flex: 1;
 }
 
+.settings-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.settings-header .settings-title {
+    margin-bottom: 32px;
+}
+
 .settings-title {
     margin-bottom: 32px;
     color: #ffffff;
     font-size: 36px;
     font-weight: bold;
+}
+
+.settings-title.back {
+    cursor: pointer;
+}
+
+.settings-title.sub {
+    color: #555555;
 }
 
 .setting-div {
@@ -344,6 +372,19 @@ body {
     color: #c6c6c6;
 }
 
+.setting-button {
+    width: 86px;
+    font-size: 18px;
+    margin-left: 12px;
+}
+
+.setting-installdir-filesize {
+    color: #9C9C9C;
+    font-weight: 500;
+    font-size: 20px;
+    margin-left: 8px;
+}
+
 .version-text {
     color: #3B3B3B;
     font-weight: 500;
@@ -353,6 +394,16 @@ body {
 /* 3. LAUNCHER SETTINGS */
 
 .centerpage-launchersettings {
+    width: 100%;
+    height: 100%;
+    padding: 16px;
+    padding-left: 24px;
+    box-sizing: border-box;
+
+    background-color: var(--sayko-background);
+}
+
+.centerpage-modpacksettings {
     width: 100%;
     height: 100%;
     padding: 16px;

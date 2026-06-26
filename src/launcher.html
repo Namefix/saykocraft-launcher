@@ -58,7 +58,7 @@
                             <span id="modpack-actionbutton-label" class="button-label">...</span>
                         </button>
 
-                        <button class="button-pack-settings warning">
+                        <button id="modpack-settingsbutton" class="button-pack-settings">
                             <svg class="icon icon-settings" aria-label="Modpack settings" data-i18n-aria-label="modpackSettings">
                                 <use href="assets/icons/sprite.svg#settings"></use>
                             </svg>
@@ -93,6 +93,25 @@
                         <div class="logout-div">
                             <button onclick="logout()" class="button-danger logout-button" data-i18n="logout">Logout</button>
                             <span id="sayko-launcherversion" class="version-text">saykocraft-launcher</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="centerpage centerpage-modpacksettings" data-page="MODPACK_SETTINGS" aria-hidden="true">
+                    <div class="settings-div">
+                        <div class="settings-header">
+                            <span id="modpacksettings-back" class="settings-title back">←</span>
+                            <span class="settings-title" data-i18n="modpackSettingsTitle">Settings</span>
+                            <span id="modpack-version" class="settings-title sub"></span>
+                        </div>
+
+                        <div class="setting-div">
+                            <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
+                            <div>
+                                <input type="text" class="setting-textinput" disabled>
+                                <button class="setting-button" onclick="browseInstance('saykocraft-earth')" data-i18n="pathBrowse">Browse</button>
+                                <span id="modpack-filesize" class="setting-installdir-filesize">Calculating...</span>
+                            </div>
                         </div>
                     </div>
                 </div>
