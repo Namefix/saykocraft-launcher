@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tauri:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-22.04
+            artifact: linux-x64
+            executable: src-tauri/target/release/saykocraft-launcher
+            args: --ci --no-sign --bundles deb,appimage
+          - name: Windows
+            runner: windows-latest
+            artifact: windows-x64
+            executable: src-tauri/target/release/saykocraft-launcher.exe
+            args: --ci --no-sign --bundles nsis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Read app version
+        id: app-version
+        shell: bash
+        run: |
+          VERSION=$(node -e "const fs = require('fs'); const config = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')); process.stdout.write(config.version);")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: saykocraft-launcher-v${{ steps.app-version.outputs.version }}-${{ matrix.artifact }}
+          path: src-tauri/target/release/bundle/**/*
+          if-no-files-found: error
+
+      - name: Upload standalone executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: saykocraft-launcher-v${{ steps.app-version.outputs.version }}-${{ matrix.artifact }}-standalone
+          path: ${{ matrix.executable }}
+          if-no-files-found: error
