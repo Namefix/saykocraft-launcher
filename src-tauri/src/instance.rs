@@ -13,7 +13,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
-const CDN_URL: &str = "http://localhost:3001";
+const DEFAULT_CDN_URL: &str = "http://localhost:3001";
+const FORCE_CDN_URL_ENV: &str = "FORCE_CDN_URL";
 const INSTANCE_STATE_CHANGED_EVENT: &str = "instance-state-changed";
 
 const INSTANCE_MANIFEST_FILE: &str = "instance.json";
@@ -145,6 +146,14 @@ impl std::error::Error for RemoteInstanceError {}
 static INSTANCES: OnceLock<RwLock<Vec<InstanceEntry>>> = OnceLock::new();
 static INSTANCE_STATE_OVERRIDES: OnceLock<RwLock<HashMap<String, InstanceState>>> = OnceLock::new();
 static INSTANCE_EVENT_APP: OnceLock<AppHandle> = OnceLock::new();
+
+fn cdn_url() -> String {
+    std::env::var(FORCE_CDN_URL_ENV)
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_CDN_URL.to_string())
+}
 
 pub fn register_instance_event_app(app: AppHandle) {
     if INSTANCE_EVENT_APP.set(app).is_err() {
@@ -776,7 +785,7 @@ async fn get_remote_instance(instance_id: &str) -> Result<InstanceManifest, Remo
             error!(%error, "Error creating remote instance client");
             RemoteInstanceError::Request(error)
         })?;
-    let url = format!("{}/instances/{}/instance.json", CDN_URL, instance_id);
+    let url = format!("{}/instances/{}/instance.json", cdn_url(), instance_id);
 
     let response = client.get(&url).send().await.map_err(|error| {
         error!(%url, %error, "Error retrieving remote instance");

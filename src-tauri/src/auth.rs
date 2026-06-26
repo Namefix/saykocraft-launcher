@@ -7,7 +7,8 @@ use tracing::error;
 
 use crate::auth;
 
-const AUTH_URL: &str = "http://localhost:3000";
+const DEFAULT_AUTH_URL: &str = "http://localhost:3000";
+const FORCE_AUTH_URL_ENV: &str = "FORCE_AUTH_URL";
 
 #[derive(Debug)]
 pub enum AuthError {
@@ -59,6 +60,14 @@ fn is_network_error(err: &reqwest::Error) -> bool {
     err.is_connect() || err.is_timeout()
 }
 
+fn auth_url() -> String {
+    std::env::var(FORCE_AUTH_URL_ENV)
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_AUTH_URL.to_string())
+}
+
 #[derive(Debug, Serialize)]
 struct LoginRequest {
     username: String,
@@ -87,7 +96,7 @@ pub async fn authenticate(username: &str, password: &str) -> Result<LoginRespons
     let client = Client::new();
 
     let response = client
-        .post(format!("{}/login", AUTH_URL))
+        .post(format!("{}/login", auth_url()))
         .json(&LoginRequest {
             username: username.to_string(),
             password: password.to_string(),
@@ -113,7 +122,7 @@ pub async fn extend_session(token: &String) -> Result<bool, AuthError> {
 
     for attempt in 1..=3 {
         let response = client
-            .post(format!("{}/extend", AUTH_URL))
+            .post(format!("{}/extend", auth_url()))
             .json(&ExtendRequest {
                 token: token.to_string(),
                 version: crate::VERSION.to_string(),
@@ -156,7 +165,7 @@ pub async fn logout_session(token: &String) -> StatusCode {
     let client = Client::new();
 
     match client
-        .post(format!("{}/logout", AUTH_URL))
+        .post(format!("{}/logout", auth_url()))
         .json(&LogoutRequest {
             token: token.to_string(),
         })
