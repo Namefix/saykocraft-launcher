@@ -4,7 +4,23 @@ use std::{
     cmp::Ordering,
     ffi::OsString,
     path::{Path, PathBuf},
+    process::Command,
 };
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+pub fn hide_child_console_window(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command
+}
 
 fn parse_semver(version: &str) -> Option<(u64, u64, u64, Option<&str>)> {
     let version = version.strip_prefix('v').unwrap_or(version);

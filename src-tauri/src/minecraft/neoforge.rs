@@ -152,7 +152,10 @@ fn run_neoforge_installer(
         Some(log_path.display().to_string()),
     );
 
-    let status = Command::new(java_path)
+    let mut command = Command::new(java_path);
+    crate::utils::hide_child_console_window(&mut command);
+
+    let status = command
         .arg("-jar")
         .arg(installer_path)
         .arg("--install-client")

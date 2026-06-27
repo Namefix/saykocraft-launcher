@@ -273,7 +273,11 @@ fn build_launch_context(
     let mut jvm_args = Vec::new();
     jvm_args.push(format!("-Xms{min_memory_mb}M"));
     jvm_args.push(format!("-Xmx{max_memory_mb}M"));
-    jvm_args.extend(FORCED_TERMINAL_JVM_ARGS.iter().map(|arg| (*arg).to_string()));
+    jvm_args.extend(
+        FORCED_TERMINAL_JVM_ARGS
+            .iter()
+            .map(|arg| (*arg).to_string()),
+    );
     jvm_args.extend(options.extra_jvm_args);
     jvm_args.extend(resolve_jvm_arguments(&version_details, &variables)?);
 
@@ -325,6 +329,7 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
     );
 
     let mut command = Command::new(&context.java_path);
+    crate::utils::hide_child_console_window(&mut command);
     command
         .args(&context.jvm_args)
         .arg(&context.main_class)
@@ -641,6 +646,7 @@ fn terminate_process(pid: u32) -> Result<(), MinecraftLaunchError> {
 #[cfg(windows)]
 fn terminate_process_command(pid: u32) -> Command {
     let mut command = Command::new("taskkill");
+    crate::utils::hide_child_console_window(&mut command);
     command.arg("/PID").arg(pid.to_string()).arg("/T");
     command
 }
