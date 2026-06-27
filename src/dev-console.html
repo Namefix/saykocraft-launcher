@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <link rel="stylesheet" href="fonts.css">
+    <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="dev-console.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SayKOCraft Developer Console</title>
+    <script src="common.js" defer></script>
+    <script src="dev-console.js" defer></script>
+</head>
+<body>
+    <div class="stickyBar">
+        <div class="buttonPart">
+            <button id="console-clear" type="button">Clear</button>
+            <button id="console-open-log-folder" type="button">Open log folder</button>
+        </div>
+        <div class="checkboxPart">
+            <label for="console-wraplines">Wrap Lines</label>
+            <input type="checkbox" id="console-wraplines">
+            <label for="console-hidelauncherlogs">Hide Launcher Logs</label>
+            <input type="checkbox" id="console-hidelauncherlogs">
+        </div>
+    </div>
+    <main id="console-output"></main>
+</body>
+</html>

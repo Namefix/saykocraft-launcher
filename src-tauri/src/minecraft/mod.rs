@@ -1,3 +1,4 @@
+pub mod console;
 mod error;
 pub mod install;
 pub mod java;

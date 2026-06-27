@@ -45,5 +45,6 @@
   "additionalJvmArguments": "Ek JVM Argümanları",
   "pathBrowse": "Göz At",
   "filesize.calculating": "Hesaplanıyor...",
-  "filesize.unavailable": "Kullanılamıyor"
+  "filesize.unavailable": "Kullanılamıyor",
+  "developerConsole": "Geliştirici Konsolu"
 }

@@ -2,19 +2,24 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fmt, fs,
-    io::{self, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{Mutex, OnceLock},
+    process::{ChildStderr, ChildStdout, Command, Stdio},
+    sync::{Arc, Mutex, OnceLock},
+    thread::{self, JoinHandle},
 };
 
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use super::MinecraftInstallError;
+use super::{
+    console::{ConsoleProcessStatus, ConsoleStatus, ConsoleStream},
+    MinecraftInstallError,
+};
 use crate::instance::{InstanceState, ModLoaderType};
 
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
+const FORCED_TERMINAL_JVM_ARGS: [&str; 2] = ["-Dterminal.jline=false", "-Dterminal.ansi=true"];
 static RUNNING_INSTANCES: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -268,6 +273,7 @@ fn build_launch_context(
     let mut jvm_args = Vec::new();
     jvm_args.push(format!("-Xms{min_memory_mb}M"));
     jvm_args.push(format!("-Xmx{max_memory_mb}M"));
+    jvm_args.extend(FORCED_TERMINAL_JVM_ARGS.iter().map(|arg| (*arg).to_string()));
     jvm_args.extend(options.extra_jvm_args);
     jvm_args.extend(resolve_jvm_arguments(&version_details, &variables)?);
 
@@ -289,12 +295,34 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut stdout = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-    writeln!(stdout, "\n[SayKOCraft Launcher] Starting Minecraft process")?;
-    let stderr = stdout.try_clone()?;
+    let log_file = Arc::new(Mutex::new(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?,
+    ));
+    let log_path_text = log_path.display().to_string();
+
+    super::console::clear_history(&context.instance_id);
+    super::console::emit_status(ConsoleStatus {
+        instance_id: context.instance_id.clone(),
+        status: ConsoleProcessStatus::Starting,
+        pid: None,
+        exit_code: None,
+        success: None,
+        log_path: Some(log_path_text.clone()),
+    });
+
+    write_console_log_line(&log_file, "")?;
+    write_console_log_line(
+        &log_file,
+        "[SayKOCraft Launcher] Starting Minecraft process",
+    )?;
+    super::console::emit_line(
+        &context.instance_id,
+        ConsoleStream::System,
+        "[SayKOCraft Launcher] Starting Minecraft process",
+    );
 
     let mut command = Command::new(&context.java_path);
     command
@@ -303,10 +331,12 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
         .args(&context.game_args)
         .current_dir(&context.working_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
+    let child_stdout = take_child_stdout(&mut child)?;
+    let child_stderr = take_child_stderr(&mut child)?;
     let pid = child.id();
     if let Err(error) = register_running_instance(&context.instance_id, pid) {
         if let Err(kill_error) = child.kill() {
@@ -314,7 +344,36 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
         }
         return Err(error);
     }
-    crate::instance::set_instance_state_override(&context.instance_id, InstanceState::Launched)?;
+    if let Err(error) =
+        crate::instance::set_instance_state_override(&context.instance_id, InstanceState::Launched)
+    {
+        unregister_running_instance(&context.instance_id);
+        if let Err(kill_error) = child.kill() {
+            warn!(%kill_error, pid, "Failed to kill Minecraft process after state update failure");
+        }
+        return Err(error.into());
+    }
+    super::console::emit_status(ConsoleStatus {
+        instance_id: context.instance_id.clone(),
+        status: ConsoleProcessStatus::Started,
+        pid: Some(pid),
+        exit_code: None,
+        success: None,
+        log_path: Some(log_path_text.clone()),
+    });
+
+    let stdout_reader = spawn_console_output_reader(
+        context.instance_id.clone(),
+        ConsoleStream::Stdout,
+        child_stdout,
+        log_file.clone(),
+    );
+    let stderr_reader = spawn_console_output_reader(
+        context.instance_id.clone(),
+        ConsoleStream::Stderr,
+        child_stderr,
+        log_file.clone(),
+    );
 
     info!(
         pid,
@@ -331,13 +390,39 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
         warn!(%error, instance_id = %context.instance_id, "Failed to clear launched instance state");
     }
 
-    let status = status?;
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            join_console_output_reader(stdout_reader, ConsoleStream::Stdout, pid);
+            join_console_output_reader(stderr_reader, ConsoleStream::Stderr, pid);
+            return Err(error.into());
+        }
+    };
+    join_console_output_reader(stdout_reader, ConsoleStream::Stdout, pid);
+    join_console_output_reader(stderr_reader, ConsoleStream::Stderr, pid);
+
     let result = LaunchResult {
         pid,
         exit_code: status.code(),
         success: status.success(),
         log_path: log_path.display().to_string(),
     };
+    super::console::emit_status(ConsoleStatus {
+        instance_id: context.instance_id.clone(),
+        status: ConsoleProcessStatus::Exited,
+        pid: Some(pid),
+        exit_code: result.exit_code,
+        success: Some(result.success),
+        log_path: Some(result.log_path.clone()),
+    });
+    super::console::emit_line(
+        &context.instance_id,
+        ConsoleStream::System,
+        format!(
+            "[SayKOCraft Launcher] Minecraft process exited with status {}",
+            status
+        ),
+    );
 
     info!(
         pid,
@@ -348,6 +433,158 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
     );
 
     Ok(result)
+}
+
+fn take_child_stdout(child: &mut std::process::Child) -> Result<ChildStdout, MinecraftLaunchError> {
+    if let Some(stdout) = child.stdout.take() {
+        return Ok(stdout);
+    }
+
+    if let Err(error) = child.kill() {
+        warn!(%error, "Failed to kill Minecraft process after missing stdout pipe");
+    }
+
+    Err(MinecraftLaunchError::Process(
+        "Minecraft stdout pipe was not available".to_string(),
+    ))
+}
+
+fn take_child_stderr(child: &mut std::process::Child) -> Result<ChildStderr, MinecraftLaunchError> {
+    if let Some(stderr) = child.stderr.take() {
+        return Ok(stderr);
+    }
+
+    if let Err(error) = child.kill() {
+        warn!(%error, "Failed to kill Minecraft process after missing stderr pipe");
+    }
+
+    Err(MinecraftLaunchError::Process(
+        "Minecraft stderr pipe was not available".to_string(),
+    ))
+}
+
+fn spawn_console_output_reader<R>(
+    instance_id: String,
+    stream: ConsoleStream,
+    reader: R,
+    log_file: Arc<Mutex<fs::File>>,
+) -> JoinHandle<io::Result<()>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || read_console_output(&instance_id, stream, reader, &log_file))
+}
+
+fn read_console_output<R>(
+    instance_id: &str,
+    stream: ConsoleStream,
+    reader: R,
+    log_file: &Arc<Mutex<fs::File>>,
+) -> io::Result<()>
+where
+    R: Read,
+{
+    let mut reader = BufReader::new(reader);
+    let mut buffer = Vec::new();
+
+    loop {
+        buffer.clear();
+        let bytes_read = reader.read_until(b'\n', &mut buffer)?;
+        if bytes_read == 0 {
+            return Ok(());
+        }
+
+        while matches!(buffer.last(), Some(b'\n' | b'\r')) {
+            buffer.pop();
+        }
+
+        let raw_line = String::from_utf8_lossy(&buffer).to_string();
+        let log_line = strip_ansi_escape_sequences(&raw_line);
+        if let Err(error) = write_console_log_line(log_file, &log_line) {
+            warn!(%error, instance_id, ?stream, "Failed to write Minecraft console line to log file");
+        }
+        super::console::emit_line(instance_id, stream, raw_line);
+    }
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character != '\x1b' {
+            output.push(character);
+            continue;
+        }
+
+        match chars.peek().copied() {
+            Some('[') => {
+                chars.next();
+                consume_csi_sequence(&mut chars);
+            }
+            Some(']') => {
+                chars.next();
+                consume_osc_sequence(&mut chars);
+            }
+            Some('(' | ')' | '*' | '+' | '-' | '.' | '/') => {
+                chars.next();
+                let _ = chars.next();
+            }
+            Some(_) => {
+                let _ = chars.next();
+            }
+            None => {}
+        }
+    }
+
+    output
+}
+
+fn consume_csi_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    for character in chars.by_ref() {
+        if ('@'..='~').contains(&character) {
+            break;
+        }
+    }
+}
+
+fn consume_osc_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    loop {
+        match chars.next() {
+            Some('\u{0007}') | None => break,
+            Some('\x1b') if matches!(chars.peek(), Some('\\')) => {
+                chars.next();
+                break;
+            }
+            Some(_) => {}
+        }
+    }
+}
+
+fn write_console_log_line(log_file: &Arc<Mutex<fs::File>>, line: &str) -> io::Result<()> {
+    let mut log_file = log_file.lock().map_err(|error| {
+        io::Error::new(io::ErrorKind::Other, format!("log lock poisoned: {error}"))
+    })?;
+
+    writeln!(log_file, "{line}")?;
+    log_file.flush()
+}
+
+fn join_console_output_reader(reader: JoinHandle<io::Result<()>>, stream: ConsoleStream, pid: u32) {
+    match reader.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            warn!(%error, ?stream, pid, "Minecraft console output reader failed");
+        }
+        Err(error) => {
+            warn!(
+                ?error,
+                ?stream,
+                pid,
+                "Minecraft console output reader panicked"
+            );
+        }
+    }
 }
 
 fn running_instances() -> &'static Mutex<HashMap<String, u32>> {

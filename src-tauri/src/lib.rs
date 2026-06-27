@@ -9,7 +9,7 @@ use keyring_core::{Entry, Error as KeyringError};
 use serde::Serialize;
 use serde_json::Value;
 use std::{fs, io, path::Path};
-use tauri::{AppHandle, Emitter, LogicalSize, RunEvent, Size};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, Size, WindowEvent};
 use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::prelude::*;
@@ -35,6 +35,10 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn window_close(window: tauri::WebviewWindow) {
+    if window.label() == "main" {
+        close_dev_console(window.app_handle());
+    }
+
     let _ = window.close();
 }
 
@@ -260,6 +264,55 @@ async fn remove_instance(id: String) -> Result<bool, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn open_dev_console(app: AppHandle, id: String) -> Result<(), String> {
+    let _ = instance::local_instance_dir(&id).map_err(|error| error.to_string())?;
+
+    if let Some(window) = app.get_webview_window(minecraft::console::DEV_CONSOLE_WINDOW_LABEL) {
+        window
+            .emit("minecraft-console-instance-selected", id)
+            .map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    let url = format!("dev-console.html?id={id}");
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        minecraft::console::DEV_CONSOLE_WINDOW_LABEL,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title("SayKOCraft Developer Console")
+    .inner_size(900.0, 520.0)
+    .min_inner_size(640.0, 360.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_game_console_history(id: String) -> Vec<minecraft::console::ConsoleLine> {
+    minecraft::console::get_history(&id)
+}
+
+#[tauri::command]
+fn clear_game_console_history(id: String) {
+    minecraft::console::clear_history(&id);
+}
+
+#[tauri::command]
+fn open_game_log_folder(id: String) -> Result<(), String> {
+    let log_dir = instance::installed_instance_dir(&id)
+        .map_err(|e| e.to_string())?
+        .join("game")
+        .join("logs");
+
+    fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    tauri_plugin_opener::open_path(&log_dir, None::<&str>).map_err(|e| e.to_string())
+}
+
 fn folder_size(path: &Path) -> io::Result<u64> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.is_file() {
@@ -358,6 +411,12 @@ async fn stop_instance(id: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+fn close_dev_console(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(minecraft::console::DEV_CONSOLE_WINDOW_LABEL) {
+        let _ = window.close();
+    }
+}
+
 fn init_tracing() -> WorkerGuard {
     let file_appender = rolling::daily("./logs", "launcher.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -397,6 +456,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             instance::register_instance_event_app(app.handle().clone());
+            minecraft::console::register_console_event_app(app.handle().clone());
 
             if let Err(error) = tauri::async_runtime::block_on(instance::init_instances()) {
                 error!(%error, "Failed to initialize instances");
@@ -440,6 +500,10 @@ pub fn run() {
             browse_instance,
             get_instance_folder_size,
             remove_instance,
+            open_dev_console,
+            get_game_console_history,
+            clear_game_console_history,
+            open_game_log_folder,
             fetch_remote_instance,
             ensure_instance,
             launch_instance,
@@ -447,8 +511,17 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|_app_handle, event| match event {
+        .run(|app_handle, event| match event {
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::CloseRequested { .. },
+                ..
+            } if label == "main" => {
+                close_dev_console(app_handle);
+            }
             RunEvent::Exit => {
+                close_dev_console(app_handle);
+
                 if let Err(err) = config::save_config() {
                     error!(error = %err, "Config saving failed");
                 }

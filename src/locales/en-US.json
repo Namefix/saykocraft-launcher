@@ -45,5 +45,6 @@
   "additionalJvmArguments": "Additional JVM Arguments",
   "pathBrowse": "Browse",
   "filesize.calculating": "Calculating...",
-  "filesize.unavailable": "Unavailable"
+  "filesize.unavailable": "Unavailable",
+  "developerConsole": "Developer Console"
 }

@@ -448,6 +448,14 @@ body {
     opacity: 0.8;
 }
 
+.centerpage-launchersettings .devconsole-button {
+    width: max-content;
+    padding-left: 8px;
+    padding-right: 8px;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
 /*  4. MODPACK SETTINGS */
 
 .modpacksettings-actionbuttons {
@@ -465,11 +473,6 @@ body {
     font-size: 18px;
     background-color: #2B2B2B;
     border-color: #3F3F3F;
-}
-
-.modpacksettings-actionbutton.danger {
-    background-color: #A12121;
-    border-color: #DF2121;
 }
 
 .centerDiv .loading-bar {

@@ -1,0 +1,90 @@
+html,
+body {
+    height: 100%;
+}
+
+body {
+    background-color: #1B1B1B;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.stickyBar button {
+    font-size: 16px;
+    width: max-content;
+    height: max-content;
+    box-shadow: none;
+}
+
+#console-output {
+    flex: 1 1 auto;
+    min-height: 0;
+    font-family: "Jetbrains Mono";
+    color: white;
+    white-space: pre;
+    tab-size: 4;
+    overflow: auto;
+}
+
+#console-output.console-wrap-lines {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+}
+
+#console-output.console-hide-launcher-logs .console-line-launcher {
+    display: none;
+}
+
+#console-output,
+#console-output * {
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+}
+
+.stickyBar {
+    position: sticky;
+    padding-left: 8px;
+    top: 0;
+    z-index: 1;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    background-color: #383838;
+}
+
+.stickyBar label {
+    font-family: "Poppins";
+    color: #fff;
+    font-size: 18px;
+    font-weight: 500;
+    margin-right: 2px;
+}
+
+.stickyBar input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--saykocraft-green);
+}
+
+.checkboxPart {
+    margin-bottom: 4px;
+}
+
+.console-level-warn {
+    color: #EEDC55;
+}
+
+.console-level-fatal,
+.console-level-error {
+    color: #FF5C5C;
+}
+
+.console-line-launcher,
+.console-level-debug {
+    color: #878787;
+}

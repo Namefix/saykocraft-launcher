@@ -91,7 +91,10 @@
                             </select>
                         </div>
                         <div class="logout-div">
-                            <button onclick="logout()" class="button-danger logout-button" data-i18n="logout">Logout</button>
+                            <div>
+                                <button onclick="logout()" class="button-danger logout-button" data-i18n="logout">Logout</button>
+                                <button onclick="openDevConsole()" class="devconsole-button" data-i18n="developerConsole">Developer Console</button>
+                            </div>
                             <span id="sayko-launcherversion" class="version-text">saykocraft-launcher</span>
                         </div>
                     </div>
@@ -113,7 +116,7 @@
                                 <span id="modpack-filesize" class="setting-installdir-filesize">Calculating...</span>
                             </div>
                             <div class="modpacksettings-actionbutton-div">
-                                <button onclick="removeInstance()" class="modpacksettings-actionbutton danger" data-i18n="action.remove">Remove</button>
+                                <button onclick="removeInstance()" class="modpacksettings-actionbutton button-danger" data-i18n="action.remove">Remove</button>
                                 <button class="modpacksettings-actionbutton" data-i18n="action.changeVersion">Change Version</button>
                                 <button onclick="ensureInstance()" class="modpacksettings-actionbutton" data-i18n="action.repair">Repair</button>
                             </div>

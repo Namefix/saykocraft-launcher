@@ -283,6 +283,14 @@ async function removeInstance(id="saykocraft-earth") {
     console.log("Instance removed", result);
 }
 
+async function openDevConsole(id=ACTIVE_INSTANCE_ID) {
+    try {
+        await invoke("open_dev_console", {id});
+    } catch (err) {
+        console.error("Failed to open developer console.", err);
+    }
+}
+
 async function setEventListeners() {
     if(tauriEvent?.listen) {
         tauriEvent.listen("instance-install-progress", (event) => {
