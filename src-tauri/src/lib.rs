@@ -395,6 +395,12 @@ async fn launch_instance(
         options.username = get_username().await?;
     }
 
+    options.session_token = Some(
+        auth::get_session_token()
+            .await?
+            .ok_or_else(|| "No active SayKOCraft session token was found".to_string())?,
+    );
+
     tauri::async_runtime::spawn_blocking(move || {
         minecraft::launch::launch_instance(&manifest, options)
     })

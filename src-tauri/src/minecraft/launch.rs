@@ -14,12 +14,14 @@ use tracing::{info, warn};
 
 use super::{
     console::{ConsoleProcessStatus, ConsoleStatus, ConsoleStream},
+    session_bridge::SessionBridge,
     MinecraftInstallError,
 };
 use crate::instance::{InstanceState, ModLoaderType};
 
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
 const FORCED_TERMINAL_JVM_ARGS: [&str; 2] = ["-Dterminal.jline=false", "-Dterminal.ansi=true"];
+const RESERVED_BRIDGE_JVM_ARG_PREFIX: &str = "-Dsaykocraft.bridge.";
 static RUNNING_INSTANCES: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -33,6 +35,8 @@ pub struct LaunchOptions {
     pub extra_jvm_args: Vec<String>,
     #[serde(default)]
     pub extra_game_args: Vec<String>,
+    #[serde(skip)]
+    pub session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,6 +103,7 @@ struct LaunchContext {
     main_class: String,
     jvm_args: Vec<String>,
     game_args: Vec<String>,
+    session_bridge: Option<SessionBridge>,
 }
 
 #[derive(Debug)]
@@ -278,7 +283,16 @@ fn build_launch_context(
             .iter()
             .map(|arg| (*arg).to_string()),
     );
-    jvm_args.extend(options.extra_jvm_args);
+    jvm_args.extend(filter_user_jvm_args(&manifest.id, options.extra_jvm_args));
+
+    let session_bridge = if let Some(session_token) = options.session_token {
+        let session_bridge = SessionBridge::start(session_token)?;
+        jvm_args.extend(session_bridge.jvm_args());
+        Some(session_bridge)
+    } else {
+        None
+    };
+
     jvm_args.extend(resolve_jvm_arguments(&version_details, &variables)?);
 
     let mut game_args = resolve_game_arguments(&version_details, &variables)?;
@@ -291,6 +305,22 @@ fn build_launch_context(
         main_class: version_details.main_class,
         jvm_args,
         game_args,
+        session_bridge,
+    })
+}
+
+fn filter_user_jvm_args(instance_id: &str, args: Vec<String>) -> impl Iterator<Item = String> + '_ {
+    args.into_iter().filter(move |arg| {
+        let is_reserved_bridge_arg = arg.trim_start().starts_with(RESERVED_BRIDGE_JVM_ARG_PREFIX);
+
+        if is_reserved_bridge_arg {
+            warn!(
+                instance_id,
+                "Ignoring reserved SayKOCraft bridge JVM argument from user settings"
+            );
+        }
+
+        !is_reserved_bridge_arg
     })
 }
 
@@ -327,6 +357,14 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
         ConsoleStream::System,
         "[SayKOCraft Launcher] Starting Minecraft process",
     );
+
+    if let Some(session_bridge) = &context.session_bridge {
+        info!(
+            instance_id = %context.instance_id,
+            port = session_bridge.port(),
+            "SayKOCraft session bridge started"
+        );
+    }
 
     let mut command = Command::new(&context.java_path);
     crate::utils::hide_child_console_window(&mut command);
