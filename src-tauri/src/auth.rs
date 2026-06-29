@@ -78,6 +78,7 @@ struct LoginRequest {
 #[derive(Debug, Serialize)]
 struct ExtendRequest {
     token: String,
+    username: String,
     version: String,
 }
 
@@ -117,7 +118,7 @@ pub async fn authenticate(username: &str, password: &str) -> Result<LoginRespons
         .map_err(|e| AuthError::InvalidResponse(e.to_string()))
 }
 
-pub async fn extend_session(token: &String) -> Result<bool, AuthError> {
+pub async fn extend_session(token: &String, username: &String) -> Result<bool, AuthError> {
     let client = Client::new();
 
     for attempt in 1..=3 {
@@ -125,6 +126,7 @@ pub async fn extend_session(token: &String) -> Result<bool, AuthError> {
             .post(format!("{}/extend", auth_url()))
             .json(&ExtendRequest {
                 token: token.to_string(),
+                username: username.to_string(),
                 version: crate::VERSION.to_string(),
             })
             .send()

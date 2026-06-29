@@ -119,7 +119,13 @@ async fn try_extend_session(app: AppHandle) -> Result<(), String> {
         return Ok(());
     };
 
-    match auth::extend_session(&session_token).await {
+    let Some(username) = get_username().await? else {
+        app.emit("session-status", "null")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    };
+
+    match auth::extend_session(&session_token, &username).await {
         Ok(true) => {
             info!("Session extended");
             // proceed to launcher
