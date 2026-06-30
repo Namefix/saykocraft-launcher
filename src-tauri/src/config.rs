@@ -61,11 +61,19 @@ pub fn app_data_dir() -> io::Result<PathBuf> {
     }
 }
 
+pub fn launcher_log_dir() -> io::Result<PathBuf> {
+    Ok(app_data_dir()?.join("logs"))
+}
+
 pub fn ensure_base_dir() -> io::Result<()> {
     // ensure base launcher dir
     let base = app_data_dir()?;
     debug!(path = %base.display(), "Ensuring launcher data directory");
     fs::create_dir_all(&base)?;
+
+    let log_dir = launcher_log_dir()?;
+    debug!(path = %log_dir.display(), "Ensuring launcher log directory");
+    fs::create_dir_all(log_dir)?;
 
     // ensure config file
     let config_path = base.join("config.json");

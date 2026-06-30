@@ -11,7 +11,10 @@ use serde_json::Value;
 use std::{fs, io, path::Path};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, Size, WindowEvent};
 use tracing::{error, info, warn};
-use tracing_appender::{non_blocking::WorkerGuard, rolling};
+use tracing_appender::{
+    non_blocking::{NonBlocking, WorkerGuard},
+    rolling::{RollingFileAppender, Rotation},
+};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -429,26 +432,83 @@ fn close_dev_console(app: &AppHandle) {
     }
 }
 
-fn init_tracing() -> WorkerGuard {
-    let file_appender = rolling::daily("./logs", "launcher.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+fn launcher_log_writer() -> Option<(NonBlocking, WorkerGuard)> {
+    let log_dir = match config::launcher_log_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("Failed to resolve launcher log directory: {error}");
+            return None;
+        }
+    };
 
+    let file_appender = match RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("launcher.log")
+        .build(&log_dir)
+    {
+        Ok(appender) => appender,
+        Err(error) => {
+            eprintln!(
+                "Failed to initialize launcher log file in {}: {error}",
+                log_dir.display()
+            );
+            return None;
+        }
+    };
+
+    Some(tracing_appender::non_blocking(file_appender))
+}
+
+fn init_tracing() -> Option<WorkerGuard> {
     let console_layer = fmt::layer().with_writer(std::io::stdout).with_ansi(true);
-
-    let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let subscriber = tracing_subscriber::registry()
-        .with(filter)
-        .with(console_layer)
-        .with(file_layer);
+    if let Some((non_blocking, guard)) = launcher_log_writer() {
+        let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+        let subscriber = tracing_subscriber::registry()
+            .with(filter)
+            .with(console_layer)
+            .with(file_layer);
 
-    if tracing::subscriber::set_global_default(subscriber).is_err() {
-        eprintln!("Tracing already initialized");
+        if tracing::subscriber::set_global_default(subscriber).is_err() {
+            eprintln!("Tracing already initialized");
+        }
+
+        Some(guard)
+    } else {
+        let subscriber = tracing_subscriber::registry()
+            .with(filter)
+            .with(console_layer);
+
+        if tracing::subscriber::set_global_default(subscriber).is_err() {
+            eprintln!("Tracing already initialized");
+        }
+
+        None
+    }
+}
+
+fn launcher_log_targets() -> Vec<tauri_plugin_log::Target> {
+    let mut targets = vec![tauri_plugin_log::Target::new(
+        tauri_plugin_log::TargetKind::Stdout,
+    )];
+
+    match config::launcher_log_dir() {
+        Ok(path) => targets.push(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::Folder {
+                path,
+                file_name: Some("app.log".to_string()),
+            },
+        )),
+        Err(error) => error!(%error, "Failed to resolve launcher log directory"),
     }
 
-    guard
+    targets.push(tauri_plugin_log::Target::new(
+        tauri_plugin_log::TargetKind::Webview,
+    ));
+
+    targets
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -478,13 +538,7 @@ pub fn run() {
         })
         .plugin(
             tauri_plugin_log::Builder::new()
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("app.log".to_string()),
-                    }),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                ])
+                .targets(launcher_log_targets())
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
