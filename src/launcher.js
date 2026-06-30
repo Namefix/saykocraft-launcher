@@ -8,6 +8,9 @@ let lastSelectedServer = document.querySelector(".serverlist .server.selected") 
 
 const modpackActionButton = document.getElementById("modpack-actionbutton");
 const modpackActionButtonLabel = document.getElementById("modpack-actionbutton-label");
+const modpackActionTooltip = document.getElementById("modpack-action-tooltip");
+const modpackActionTooltipTitle = document.getElementById("modpack-action-tooltip-title");
+const modpackActionTooltipDescription = document.getElementById("modpack-action-tooltip-description");
 const modpackSettingsButton = document.getElementById("modpack-settingsbutton");
 const modpackSettingsBackButton = document.getElementById("modpacksettings-back");
 
@@ -17,6 +20,8 @@ const launcherLoadingBar = document.getElementById("launcher-loadingbar");
 const launcherSettingsVersionText = document.getElementById("sayko-launcherversion");
 const modpackVersionText = document.getElementById("modpack-version");
 const modpackFileSizeText = document.getElementById("modpack-filesize");
+let actionButtonTooltipEnabled = false;
+let actionButtonTooltipHovered = false;
 
 const LauncherView = Object.freeze({
     MAIN: "MAIN",
@@ -40,6 +45,21 @@ modpackSettingsButton?.addEventListener("click", async () => {
 
 modpackSettingsBackButton?.addEventListener("click", () => {
     setLauncherView(LauncherView.MAIN);
+});
+
+modpackActionButton?.addEventListener("mouseenter", (event) => {
+    actionButtonTooltipHovered = true;
+    updateActionButtonTooltipPosition(event);
+    syncActionButtonTooltipVisibility();
+});
+
+modpackActionButton?.addEventListener("mousemove", (event) => {
+    updateActionButtonTooltipPosition(event);
+});
+
+modpackActionButton?.addEventListener("mouseleave", () => {
+    actionButtonTooltipHovered = false;
+    syncActionButtonTooltipVisibility();
 });
 
 serverButtons.forEach((server) => {
@@ -151,6 +171,11 @@ async function setModpackButtons() {
         }
         case InstanceState.Updating: {
             setActionButtonState("update", t("action.updating"), true);
+            setActionButtonTooltip(
+                t("actionTooltip.updatingTitle"),
+                t("actionTooltip.updatingDescription")
+            );
+            setActionButtonTooltipEnabled(true);
             setModpackSettingsButtonState(true);
             break;
         }
@@ -171,6 +196,11 @@ async function setModpackButtons() {
         }
         case InstanceState.Downloading: {
             setActionButtonState("download", t("action.downloading"), true);
+            setActionButtonTooltip(
+                t("actionTooltip.downloadingTitle"),
+                t("actionTooltip.downloadingDescription")
+            );
+            setActionButtonTooltipEnabled(true);
             setModpackSettingsButtonState(true);
             break;
         }
@@ -187,6 +217,54 @@ function setActionButtonState(classname, labeltext, disabled=false) {
     if(classname) modpackActionButton.classList.add(classname);
     if(disabled) modpackActionButton.classList.add("disabled");
     modpackActionButtonLabel.textContent = labeltext;
+    setActionButtonTooltipEnabled(false);
+}
+
+function setActionButtonTooltip(title, description) {
+    if (modpackActionTooltipTitle) {
+        modpackActionTooltipTitle.textContent = title ?? "";
+    }
+
+    if (modpackActionTooltipDescription) {
+        modpackActionTooltipDescription.textContent = description ?? "";
+    }
+}
+
+function setActionButtonTooltipEnabled(enabled) {
+    actionButtonTooltipEnabled = Boolean(enabled);
+    syncActionButtonTooltipVisibility();
+}
+
+function syncActionButtonTooltipVisibility() {
+    if (!modpackActionTooltip) {
+        return;
+    }
+
+    const hasContent = Boolean(
+        modpackActionTooltipTitle?.textContent ||
+        modpackActionTooltipDescription?.textContent
+    );
+    const visible = actionButtonTooltipEnabled && actionButtonTooltipHovered && hasContent;
+
+    modpackActionTooltip.classList.toggle("visible", visible);
+    modpackActionTooltip.setAttribute("aria-hidden", (!visible).toString());
+}
+
+function updateActionButtonTooltipPosition(event) {
+    if (!modpackActionTooltip || !event) {
+        return;
+    }
+
+    const offset = 18;
+    const tooltipWidth = modpackActionTooltip.offsetWidth || 240;
+    const tooltipHeight = modpackActionTooltip.offsetHeight || 64;
+    const maxX = window.innerWidth - tooltipWidth - 8;
+    const maxY = window.innerHeight - tooltipHeight - 8;
+    const x = Math.max(8, Math.min(event.clientX + offset, maxX));
+    const y = Math.max(8, Math.min(event.clientY + offset, maxY));
+
+    modpackActionTooltip.style.setProperty("--tooltip-x", `${x}px`);
+    modpackActionTooltip.style.setProperty("--tooltip-y", `${y}px`);
 }
 
 function setModpackSettingsButtonState(disabled, warning=false) {
@@ -300,6 +378,8 @@ async function setEventListeners() {
     if(tauriEvent?.listen) {
         tauriEvent.listen("instance-install-progress", (event) => {
             const progress = event.payload;
+
+            setActionButtonTooltip(t("installphase."+progress.phase), progress.current_label);
 
             setProgressBarPercentage(progress.overall_percentage ?? 0);
         });

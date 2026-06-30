@@ -31,6 +31,10 @@
   "action.downloading": "İndiriliyor",
   "action.update": "Güncelle",
   "action.updating": "Güncelleniyor",
+  "actionTooltip.downloadingTitle": "İndirme sürüyor",
+  "actionTooltip.downloadingDescription": "Mod paketi dosyaları indiriliyor. Bu işlem biterken başlatıcıyı kullanmaya devam edebilirsiniz.",
+  "actionTooltip.updatingTitle": "Güncelleme sürüyor",
+  "actionTooltip.updatingDescription": "Launcher en yeni dosyaları uyguluyor. Güncelleme tamamlanınca başlatabilirsiniz.",
   "action.broken": "Bozuk",
   "action.remove": "Kaldır",
   "action.changeVersion": "Sürüm Değiştir",
@@ -46,5 +50,16 @@
   "pathBrowse": "Göz At",
   "filesize.calculating": "Hesaplanıyor...",
   "filesize.unavailable": "Kullanılamıyor",
-  "developerConsole": "Geliştirici Konsolu"
+  "developerConsole": "Geliştirici Konsolu",
+  "installphase.preparing": "Hazırlanıyor",
+  "installphase.minecraft_manifest": "Minecraft Manifest'i Yakalanıyor",
+  "installphase.java_runtime": "Java Yürütme Ortamı İndiriliyor",
+  "installphase.minecraft_client": "Minecraft İstemcisi İndiriliyor",
+  "installphase.minecraft_libraries": "Minecraft Kütüphaneleri İndiriliyor",
+  "installphase.minecraft_assets": "Minecraft Kaynakları İndiriliyor",
+  "installphase.minecraft_natives": "Mineraft Yerel Dosyaları İndiriliyor",
+  "installphase.neoforge": "NeoForge Kuruluyor",
+  "installphase.modpack_files": "Modpaketi Dosyaları İndiriliyor",
+  "installphase.finalizing": "Tamamlanıyor",
+  "installphase.done": "Tamamlandı"
 }

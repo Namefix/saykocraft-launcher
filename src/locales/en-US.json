@@ -31,6 +31,10 @@
   "action.downloading": "Downloading",
   "action.update": "Update",
   "action.updating": "Updating",
+  "actionTooltip.downloadingTitle": "Download in progress",
+  "actionTooltip.downloadingDescription": "The modpack files are being downloaded. You can keep using the launcher while this finishes.",
+  "actionTooltip.updatingTitle": "Update in progress",
+  "actionTooltip.updatingDescription": "The modpack is applying the latest files. Starting is available when the update completes.",
   "action.broken": "Broken",
   "action.remove": "Remove",
   "action.changeVersion": "Change Version",
@@ -46,5 +50,16 @@
   "pathBrowse": "Browse",
   "filesize.calculating": "Calculating...",
   "filesize.unavailable": "Unavailable",
-  "developerConsole": "Developer Console"
+  "developerConsole": "Developer Console",
+  "installphase.preparing": "Preparing",
+  "installphase.minecraft_manifest": "Fetching Minecraft Manifest",
+  "installphase.java_runtime": "Downloading Java Runtime",
+  "installphase.minecraft_client": "Downloading Minecraft Client",
+  "installphase.minecraft_libraries": "Downloading Minecraft Libraries",
+  "installphase.minecraft_assets": "Downloading Minecraft Assets",
+  "installphase.minecraft_natives": "Downloading Minecraft Native Files",
+  "installphase.neoforge": "Setting up NeoForge",
+  "installphase.modpack_files": "Downloading Modpack Files",
+  "installphase.finalizing": "Finalizing",
+  "installphase.done": "Done"
 }
