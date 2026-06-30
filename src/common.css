@@ -48,8 +48,8 @@ button {
 }
 
 .button-danger {
-    background-color: #A12121;
-    border-color: #DF2121;
+    background-color: #A12121 !important;
+    border-color: #DF2121 !important;
 }
 
 input[type="text"], input[type="password"], input[type="number"], textarea {

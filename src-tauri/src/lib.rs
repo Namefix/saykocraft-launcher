@@ -8,7 +8,14 @@ mod utils;
 use keyring_core::{Entry, Error as KeyringError};
 use serde::Serialize;
 use serde_json::Value;
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, Size, WindowEvent};
 use tracing::{error, info, warn};
 use tracing_appender::{
@@ -21,6 +28,9 @@ use tracing_subscriber::{fmt, EnvFilter};
 use auth::AuthError;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+const MAIN_WINDOW_LABEL: &str = "main";
+static LAUNCHER_CLOSED_FOR_GAME: AtomicBool = AtomicBool::new(false);
+static LAUNCHER_REOPEN_PENDING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize)]
 struct InstanceSettingsResponse {
@@ -380,6 +390,7 @@ async fn ensure_instance(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn launch_instance(
+    app: AppHandle,
     id: String,
     options: Option<minecraft::LaunchOptions>,
 ) -> Result<minecraft::LaunchResult, String> {
@@ -410,12 +421,33 @@ async fn launch_instance(
             .ok_or_else(|| "No active SayKOCraft session token was found".to_string())?,
     );
 
-    tauri::async_runtime::spawn_blocking(move || {
-        minecraft::launch::launch_instance(&manifest, options)
-    })
-    .await
-    .map_err(|error| format!("Minecraft launch task failed: {error}"))?
-    .map_err(|error| error.to_string())
+    let close_launcher_after_game_window = !config::get_config().keep_launcher_open();
+    let result = if close_launcher_after_game_window {
+        let launch_app = app.clone();
+        let hooks = minecraft::launch::LaunchLifecycleHooks {
+            on_game_window_ready: Some(Arc::new(move |started| {
+                close_launcher_window_for_game(&launch_app, started);
+            })),
+        };
+
+        tauri::async_runtime::spawn_blocking(move || {
+            minecraft::launch::launch_instance_with_hooks(&manifest, options, hooks)
+        })
+        .await
+    } else {
+        tauri::async_runtime::spawn_blocking(move || {
+            minecraft::launch::launch_instance(&manifest, options)
+        })
+        .await
+    };
+
+    if close_launcher_after_game_window {
+        request_launcher_reopen_after_game(&app);
+    }
+
+    result
+        .map_err(|error| format!("Minecraft launch task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -430,6 +462,119 @@ fn close_dev_console(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(minecraft::console::DEV_CONSOLE_WINDOW_LABEL) {
         let _ = window.close();
     }
+}
+
+fn close_launcher_window_for_game(app: &AppHandle, started: &minecraft::launch::LaunchStarted) {
+    if LAUNCHER_CLOSED_FOR_GAME.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let app = app.clone();
+    let instance_id = started.instance_id.clone();
+    let pid = started.pid;
+    let app_for_task = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(window) = app_for_task.get_webview_window(MAIN_WINDOW_LABEL) else {
+            warn!(
+                instance_id,
+                pid, "Launcher window was already closed after Minecraft game window appeared"
+            );
+            return;
+        };
+
+        if let Err(error) = window.close() {
+            LAUNCHER_CLOSED_FOR_GAME.store(false, Ordering::SeqCst);
+            error!(
+                %error,
+                instance_id,
+                pid, "Failed to close launcher window after Minecraft game window appeared"
+            );
+            return;
+        }
+
+        info!(
+            instance_id,
+            pid, "Closed launcher window after Minecraft game window appeared"
+        );
+    }) {
+        LAUNCHER_CLOSED_FOR_GAME.store(false, Ordering::SeqCst);
+        error!(
+            %error,
+            instance_id = %started.instance_id,
+            pid = started.pid,
+            "Failed to schedule launcher window close"
+        );
+    }
+}
+
+fn request_launcher_reopen_after_game(app: &AppHandle) {
+    if !LAUNCHER_CLOSED_FOR_GAME.swap(false, Ordering::SeqCst) {
+        return;
+    }
+
+    LAUNCHER_REOPEN_PENDING.store(true, Ordering::SeqCst);
+    schedule_launcher_reopen(app);
+}
+
+fn schedule_launcher_reopen(app: &AppHandle) {
+    if !LAUNCHER_REOPEN_PENDING.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let app = app.clone();
+    let app_for_task = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        try_reopen_launcher_window(&app_for_task);
+    }) {
+        LAUNCHER_REOPEN_PENDING.store(false, Ordering::SeqCst);
+        error!(%error, "Failed to schedule launcher window reopen");
+        app.exit(1);
+    }
+}
+
+fn try_reopen_launcher_window(app: &AppHandle) {
+    if !LAUNCHER_REOPEN_PENDING.load(Ordering::SeqCst) {
+        return;
+    }
+
+    if app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
+        return;
+    }
+
+    match create_launcher_window(app) {
+        Ok(window) => {
+            LAUNCHER_REOPEN_PENDING.store(false, Ordering::SeqCst);
+            if let Err(error) = window.set_focus() {
+                warn!(%error, "Failed to focus reopened launcher window");
+            }
+            info!("Reopened launcher window after Minecraft exited");
+        }
+        Err(error) => {
+            LAUNCHER_REOPEN_PENDING.store(false, Ordering::SeqCst);
+            error!(%error, "Failed to reopen launcher window after Minecraft exited");
+            app.exit(1);
+        }
+    }
+}
+
+fn create_launcher_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    tauri::WebviewWindowBuilder::new(
+        app,
+        MAIN_WINDOW_LABEL,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("SayKOCraft Launcher")
+    .inner_size(512.0, 640.0)
+    .min_inner_size(512.0, 600.0)
+    .decorations(false)
+    .maximizable(false)
+    .center()
+    .build()
+}
+
+fn should_keep_backend_alive_without_windows() -> bool {
+    LAUNCHER_CLOSED_FOR_GAME.load(Ordering::SeqCst)
+        || LAUNCHER_REOPEN_PENDING.load(Ordering::SeqCst)
 }
 
 fn launcher_log_writer() -> Option<(NonBlocking, WorkerGuard)> {
@@ -578,12 +723,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| match event {
+            RunEvent::ExitRequested { api, code, .. }
+                if code.is_none() && should_keep_backend_alive_without_windows() =>
+            {
+                api.prevent_exit();
+            }
             RunEvent::WindowEvent {
                 label,
                 event: WindowEvent::CloseRequested { .. },
                 ..
-            } if label == "main" => {
+            } if label == MAIN_WINDOW_LABEL && !LAUNCHER_CLOSED_FOR_GAME.load(Ordering::SeqCst) => {
                 close_dev_console(app_handle);
+            }
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Destroyed,
+                ..
+            } if label == MAIN_WINDOW_LABEL && LAUNCHER_REOPEN_PENDING.load(Ordering::SeqCst) => {
+                schedule_launcher_reopen(app_handle);
             }
             RunEvent::Exit => {
                 close_dev_console(app_handle);

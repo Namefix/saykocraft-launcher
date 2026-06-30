@@ -26,6 +26,10 @@ impl Config {
     pub fn resolved_data_dir(&self) -> io::Result<PathBuf> {
         resolve_path(&self.data_dir)
     }
+
+    pub fn keep_launcher_open(&self) -> bool {
+        self.keep_launcher_open
+    }
 }
 
 impl Default for Config {

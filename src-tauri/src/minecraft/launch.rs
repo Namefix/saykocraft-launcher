@@ -5,12 +5,16 @@ use std::{
     io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{ChildStderr, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{
     console::{ConsoleProcessStatus, ConsoleStatus, ConsoleStream},
@@ -22,6 +26,7 @@ use crate::instance::{InstanceState, ModLoaderType};
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
 const FORCED_TERMINAL_JVM_ARGS: [&str; 2] = ["-Dterminal.jline=false", "-Dterminal.ansi=true"];
 const RESERVED_BRIDGE_JVM_ARG_PREFIX: &str = "-Dsaykocraft.bridge.";
+const GAME_WINDOW_READY_FALLBACK_DELAY: Duration = Duration::from_secs(20);
 static RUNNING_INSTANCES: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -46,6 +51,24 @@ pub struct LaunchResult {
     pub exit_code: Option<i32>,
     pub success: bool,
     pub log_path: String,
+}
+
+pub struct LaunchLifecycleHooks {
+    pub on_game_window_ready: Option<Arc<dyn Fn(&LaunchStarted) + Send + Sync + 'static>>,
+}
+
+impl Default for LaunchLifecycleHooks {
+    fn default() -> Self {
+        Self {
+            on_game_window_ready: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LaunchStarted {
+    pub instance_id: String,
+    pub pid: u32,
 }
 
 #[derive(Debug)]
@@ -214,6 +237,14 @@ pub fn launch_instance(
     manifest: &crate::instance::InstanceManifest,
     options: LaunchOptions,
 ) -> Result<LaunchResult, MinecraftLaunchError> {
+    launch_instance_with_hooks(manifest, options, LaunchLifecycleHooks::default())
+}
+
+pub fn launch_instance_with_hooks(
+    manifest: &crate::instance::InstanceManifest,
+    options: LaunchOptions,
+    hooks: LaunchLifecycleHooks,
+) -> Result<LaunchResult, MinecraftLaunchError> {
     if running_instance_pid(&manifest.id)?.is_some() {
         return Err(MinecraftLaunchError::Validation(format!(
             "instance is already running: {}",
@@ -222,7 +253,7 @@ pub fn launch_instance(
     }
 
     let context = build_launch_context(manifest, options)?;
-    run_minecraft(context)
+    run_minecraft(context, hooks)
 }
 
 pub fn stop_instance(instance_id: &str) -> Result<(), MinecraftLaunchError> {
@@ -324,7 +355,10 @@ fn filter_user_jvm_args(instance_id: &str, args: Vec<String>) -> impl Iterator<I
     })
 }
 
-fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunchError> {
+fn run_minecraft(
+    context: LaunchContext,
+    hooks: LaunchLifecycleHooks,
+) -> Result<LaunchResult, MinecraftLaunchError> {
     let log_path = context.working_dir.join("logs").join("launcher-game.log");
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
@@ -405,17 +439,43 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
         log_path: Some(log_path_text.clone()),
     });
 
+    let game_window_ready = Arc::new(AtomicBool::new(false));
+    if let Some(on_game_window_ready) = hooks.on_game_window_ready.clone() {
+        let ready = game_window_ready.clone();
+        let started = LaunchStarted {
+            instance_id: context.instance_id.clone(),
+            pid,
+        };
+        thread::spawn(move || {
+            thread::sleep(GAME_WINDOW_READY_FALLBACK_DELAY);
+            if !ready.swap(true, Ordering::SeqCst) {
+                debug!(
+                    instance_id = %started.instance_id,
+                    pid = started.pid,
+                    "Using fallback Minecraft game window readiness timer"
+                );
+                on_game_window_ready(&started);
+            }
+        });
+    }
+
     let stdout_reader = spawn_console_output_reader(
         context.instance_id.clone(),
         ConsoleStream::Stdout,
         child_stdout,
         log_file.clone(),
+        hooks.on_game_window_ready.clone(),
+        game_window_ready.clone(),
+        pid,
     );
     let stderr_reader = spawn_console_output_reader(
         context.instance_id.clone(),
         ConsoleStream::Stderr,
         child_stderr,
         log_file.clone(),
+        hooks.on_game_window_ready.clone(),
+        game_window_ready.clone(),
+        pid,
     );
 
     info!(
@@ -428,6 +488,7 @@ fn run_minecraft(context: LaunchContext) -> Result<LaunchResult, MinecraftLaunch
     );
 
     let status = child.wait();
+    game_window_ready.store(true, Ordering::SeqCst);
     unregister_running_instance(&context.instance_id);
     if let Err(error) = crate::instance::clear_instance_state_override(&context.instance_id) {
         warn!(%error, instance_id = %context.instance_id, "Failed to clear launched instance state");
@@ -511,11 +572,24 @@ fn spawn_console_output_reader<R>(
     stream: ConsoleStream,
     reader: R,
     log_file: Arc<Mutex<fs::File>>,
+    on_game_window_ready: Option<Arc<dyn Fn(&LaunchStarted) + Send + Sync + 'static>>,
+    game_window_ready: Arc<AtomicBool>,
+    pid: u32,
 ) -> JoinHandle<io::Result<()>>
 where
     R: Read + Send + 'static,
 {
-    thread::spawn(move || read_console_output(&instance_id, stream, reader, &log_file))
+    thread::spawn(move || {
+        read_console_output(
+            &instance_id,
+            stream,
+            reader,
+            &log_file,
+            on_game_window_ready,
+            &game_window_ready,
+            pid,
+        )
+    })
 }
 
 fn read_console_output<R>(
@@ -523,6 +597,9 @@ fn read_console_output<R>(
     stream: ConsoleStream,
     reader: R,
     log_file: &Arc<Mutex<fs::File>>,
+    on_game_window_ready: Option<Arc<dyn Fn(&LaunchStarted) + Send + Sync + 'static>>,
+    game_window_ready: &Arc<AtomicBool>,
+    pid: u32,
 ) -> io::Result<()>
 where
     R: Read,
@@ -543,11 +620,52 @@ where
 
         let raw_line = String::from_utf8_lossy(&buffer).to_string();
         let log_line = strip_ansi_escape_sequences(&raw_line);
+        if is_game_window_ready_log_line(&log_line) {
+            notify_game_window_ready(
+                instance_id,
+                pid,
+                &on_game_window_ready,
+                game_window_ready,
+                "Minecraft log output",
+            );
+        }
         if let Err(error) = write_console_log_line(log_file, &log_line) {
             warn!(%error, instance_id, ?stream, "Failed to write Minecraft console line to log file");
         }
         super::console::emit_line(instance_id, stream, raw_line);
     }
+}
+
+fn notify_game_window_ready(
+    instance_id: &str,
+    pid: u32,
+    on_game_window_ready: &Option<Arc<dyn Fn(&LaunchStarted) + Send + Sync + 'static>>,
+    game_window_ready: &Arc<AtomicBool>,
+    source: &str,
+) {
+    let Some(on_game_window_ready) = on_game_window_ready.as_ref() else {
+        return;
+    };
+
+    if game_window_ready.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    debug!(
+        instance_id,
+        pid, source, "Minecraft game window readiness detected"
+    );
+    on_game_window_ready(&LaunchStarted {
+        instance_id: instance_id.to_string(),
+        pid,
+    });
+}
+
+fn is_game_window_ready_log_line(line: &str) -> bool {
+    let line = line.to_ascii_lowercase();
+    line.contains("backend library: lwjgl")
+        || line.contains("loading immediatewindowprovider")
+        || line.contains("immediatewindowprovider fmlearlywindow")
 }
 
 fn strip_ansi_escape_sequences(input: &str) -> String {

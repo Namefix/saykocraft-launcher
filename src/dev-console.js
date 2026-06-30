@@ -38,6 +38,7 @@ const ANSI_BRIGHT_COLORS = [
 const consoleOutput = document.getElementById("console-output");
 const clearConsoleButton = document.getElementById("console-clear");
 const openLogFolderButton = document.getElementById("console-open-log-folder");
+const killGameButton = document.getElementById("console-kill-game");
 const wrapLinesInput = document.getElementById("console-wraplines");
 const hideLauncherLogsInput = document.getElementById("console-hidelauncherlogs");
 const query = new URLSearchParams(window.location.search);
@@ -193,6 +194,10 @@ function initializeConsoleButtons() {
     openLogFolderButton?.addEventListener("click", () => {
         openLogFolder().catch(console.error);
     });
+
+    killGameButton?.addEventListener("click", () => {
+        stopInstance("saykocraft-earth").catch(console.error);
+    })
 }
 
 async function clearConsole() {
@@ -208,6 +213,12 @@ async function clearConsole() {
 
 async function openLogFolder() {
     await invoke("open_game_log_folder", { id: activeInstanceId });
+}
+
+async function stopInstance(id) {
+    console.log("Stopping instance", id);
+
+    await invoke("stop_instance", {id});
 }
 
 function isSaykocraftLauncherLog(text) {
