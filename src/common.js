@@ -3,6 +3,20 @@ const { openUrl } = window.__TAURI__.opener;
 const { listen } = window.__TAURI__.event;
 const tauriEvent = window.__TAURI__?.event;
 
+const pressedKeys = new Set();
+
+document.addEventListener("keydown", (e) => {
+    pressedKeys.add(e.code);
+});
+
+document.addEventListener("keyup", (e) => {
+    pressedKeys.delete(e.code);
+});
+
+document.addEventListener("blur", () => {
+    pressedKeys.clear();
+});
+
 const InstanceState = Object.freeze({
     Unknown: 0,
     NotDownloaded: 1,
@@ -42,6 +56,10 @@ async function get_config() {
 
 async function logout() {
     sessionStorage.setItem("skip-session-check", "1");
+
+    try {
+        await invoke("stop_instance", {id:"saykocraft-earth"});
+    } catch {}
 
     try {
         await invoke("reset_data");

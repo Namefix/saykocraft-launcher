@@ -214,6 +214,11 @@ function formatFileSize(bytes) {
 async function actionButtonHandler() {
     let buttonState = await invoke("get_instance_state", {id: ACTIVE_INSTANCE_ID});
 
+    // Forced launcher start, not advised unless absolutely necessary.
+    if(pressedKeys.has("KeyN") && pressedKeys.has("KeyF") && pressedKeys.has("KeyG")) {
+        buttonState = InstanceState.Ready;
+    }
+
     switch(Object.values(InstanceState)[buttonState]) {
         case InstanceState.RequiresUpdate:
         case InstanceState.NotDownloaded: {

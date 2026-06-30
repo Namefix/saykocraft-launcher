@@ -132,6 +132,10 @@ body {
     flex-direction: column;
 }
 
+.footerDiv a {
+    z-index: 9999;
+}
+
 .footerDiv .icon-discord {
     width: 32px;
     height: 32px;
