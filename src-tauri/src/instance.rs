@@ -13,7 +13,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
-const DEFAULT_CDN_URL: &str = "http://localhost:3001";
+const DEFAULT_CDN_URL: &str = "https://nf.blacksmith-ent.com/saykocraft-cdn";
 const FORCE_CDN_URL_ENV: &str = "FORCE_CDN_URL";
 const INSTANCE_STATE_CHANGED_EVENT: &str = "instance-state-changed";
 

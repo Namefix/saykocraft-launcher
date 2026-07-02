@@ -7,7 +7,7 @@ use tracing::error;
 
 use crate::auth;
 
-const DEFAULT_AUTH_URL: &str = "http://localhost:3000";
+const DEFAULT_AUTH_URL: &str = "https://nf.blacksmith-ent.com/auth";
 const FORCE_AUTH_URL_ENV: &str = "FORCE_AUTH_URL";
 
 #[derive(Debug)]
