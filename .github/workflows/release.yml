@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Release tag to create or update. Use v__VERSION__ to read the version from tauri.conf.json.
+        required: true
+        default: v__VERSION__
+
+jobs:
+  release:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-22.04
+            artifact: linux-x64
+            executable: src-tauri/target/release/saykocraft-launcher
+            standaloneExt: ""
+            args: --ci --no-sign --bundles deb,appimage
+          - name: Windows
+            runner: windows-latest
+            artifact: windows-x64
+            executable: src-tauri/target/release/saykocraft-launcher.exe
+            standaloneExt: ".exe"
+            args: --ci --no-sign --bundles nsis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget \
+            xdg-utils
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Read release info
+        id: release-info
+        shell: bash
+        run: |
+          VERSION=$(node -e "const fs = require('fs'); const config = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')); process.stdout.write(config.version);")
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          else
+            TAG_NAME="$GITHUB_REF_NAME"
+          fi
+          TAG_NAME="${TAG_NAME//__VERSION__/$VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build and upload release assets
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.release-info.outputs.tag_name }}
+          releaseName: SayKOCraft Launcher ${{ steps.release-info.outputs.tag_name }}
+          releaseBody: See the assets below to download the installer for your platform.
+          releaseDraft: true
+          prerelease: true
+          retryAttempts: 2
+          releaseAssetNamePattern: saykocraft-launcher-v[version]-[platform]-[arch][setup][ext]
+          args: ${{ matrix.args }}
+
+      - name: Prepare standalone executable asset
+        id: standalone
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          ASSET_NAME="saykocraft-launcher-v${{ steps.release-info.outputs.version }}-${{ matrix.artifact }}-standalone${{ matrix.standaloneExt }}"
+          cp "${{ matrix.executable }}" "release-assets/$ASSET_NAME"
+          echo "path=release-assets/$ASSET_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload standalone executable
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.release-info.outputs.tag_name }}
+          draft: true
+          prerelease: true
+          files: ${{ steps.standalone.outputs.path }}
+          fail_on_unmatched_files: true
