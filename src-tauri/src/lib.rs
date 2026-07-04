@@ -61,6 +61,11 @@ fn window_minimize(window: tauri::WebviewWindow) {
 }
 
 #[tauri::command]
+fn open_webview_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
+#[tauri::command]
 fn set_launcher_window(window: tauri::WebviewWindow) -> Result<(), String> {
     let size = Size::Logical(LogicalSize::new(1280.0, 768.0));
     window.set_size(size).map_err(|e| e.to_string())?;
@@ -305,6 +310,7 @@ async fn open_dev_console(app: AppHandle, id: String) -> Result<(), String> {
     .title("SayKOCraft Developer Console")
     .inner_size(900.0, 520.0)
     .min_inner_size(640.0, 360.0)
+    .devtools(true)
     .build()
     .map_err(|error| error.to_string())?;
 
@@ -568,6 +574,7 @@ fn create_launcher_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow
     .min_inner_size(512.0, 600.0)
     .decorations(false)
     .maximizable(false)
+    .devtools(true)
     .center()
     .build()
 }
@@ -691,6 +698,7 @@ pub fn run() {
             greet,
             window_close,
             window_minimize,
+            open_webview_devtools,
             set_launcher_window,
             auth::login,
             auth::get_session_token,

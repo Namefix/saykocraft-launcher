@@ -5,9 +5,55 @@ const tauriEvent = window.__TAURI__?.event;
 
 const pressedKeys = new Set();
 
+function isReloadShortcut(e) {
+    const key = e.key?.toLowerCase();
+
+    return e.code === "F5" ||
+        key === "f5" ||
+        ((e.ctrlKey || e.metaKey) && key === "r");
+}
+
+function preventReloadShortcut(e) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+}
+
+function isEditableContextTarget(target) {
+    return Boolean(target?.closest?.(
+        "input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly]), [contenteditable='true']"
+    ));
+}
+
+async function openWebviewDevtools() {
+    try {
+        await invoke("open_webview_devtools");
+    } catch (err) {
+        console.error("Failed to open webview devtools.", err);
+    }
+}
+
+document.addEventListener("contextmenu", (e) => {
+    if (isEditableContextTarget(e.target)) {
+        return;
+    }
+
+    e.preventDefault();
+}, { capture: true });
+
 document.addEventListener("keydown", (e) => {
+    if (isReloadShortcut(e)) {
+        preventReloadShortcut(e);
+        return;
+    }
+
+    if (e.code === "F12" || e.key === "F12") {
+        e.preventDefault();
+        openWebviewDevtools();
+        return;
+    }
+
     pressedKeys.add(e.code);
-});
+}, { capture: true });
 
 document.addEventListener("keyup", (e) => {
     pressedKeys.delete(e.code);
