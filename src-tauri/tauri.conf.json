@@ -16,8 +16,7 @@
         "minWidth": 512,
         "minHeight": 600,
         "decorations": false,
-        "maximizable": false,
-        "devtools": true
+        "maximizable": false
       }
     ],
     "security": {

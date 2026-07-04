@@ -89,7 +89,7 @@ function openDiscord() {
 }
 
 function openPasswordForget() {
-    openUrl("https://google.com")
+    openUrl("https://nf.blacksmith-ent.com/auth/password")
 }
 
 function reset_data() {
