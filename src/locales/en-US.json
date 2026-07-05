@@ -21,6 +21,7 @@
   "installationDirectory": "Installation Directory",
   "dataDirectory": "Data Directory",
   "keepLauncherOpen": "Keep Launcher Open",
+  "preferDiscreteGpu": "Prefer Discrete GPU",
   "language": "Language",
   "language.englishUS": "English (US)",
   "language.turkish": "Turkish",

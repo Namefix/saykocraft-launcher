@@ -127,6 +127,7 @@ struct LaunchContext {
     jvm_args: Vec<String>,
     game_args: Vec<String>,
     session_bridge: Option<SessionBridge>,
+    prefer_discrete_gpu: bool,
 }
 
 #[derive(Debug)]
@@ -271,7 +272,8 @@ fn build_launch_context(
     options: LaunchOptions,
 ) -> Result<LaunchContext, MinecraftLaunchError> {
     let version_details = read_effective_version_details(manifest)?;
-    let data_dir = crate::config::get_config().resolved_data_dir()?;
+    let config = crate::config::get_config();
+    let data_dir = config.resolved_data_dir()?;
     let working_dir = super::paths::instance_game_dir(&manifest.id)?;
     fs::create_dir_all(&working_dir)?;
 
@@ -337,6 +339,7 @@ fn build_launch_context(
         jvm_args,
         game_args,
         session_bridge,
+        prefer_discrete_gpu: config.prefer_discrete_gpu(),
     })
 }
 
@@ -402,6 +405,18 @@ fn run_minecraft(
 
     let mut command = Command::new(&context.java_path);
     crate::utils::hide_child_console_window(&mut command);
+    if context.prefer_discrete_gpu {
+        apply_discrete_gpu_preference(&mut command, &context.java_path, &context.instance_id);
+        write_console_log_line(
+            &log_file,
+            "[SayKOCraft Launcher] Prefer discrete GPU is enabled",
+        )?;
+        super::console::emit_line(
+            &context.instance_id,
+            ConsoleStream::System,
+            "[SayKOCraft Launcher] Prefer discrete GPU is enabled",
+        );
+    }
     command
         .args(&context.jvm_args)
         .arg(&context.main_class)
@@ -537,6 +552,94 @@ fn run_minecraft(
     );
 
     Ok(result)
+}
+
+fn apply_discrete_gpu_preference(command: &mut Command, java_path: &Path, instance_id: &str) {
+    apply_discrete_gpu_environment(command);
+
+    if let Err(error) = apply_windows_high_performance_gpu_preference(java_path) {
+        warn!(
+            %error,
+            instance_id,
+            java = %java_path.display(),
+            "Failed to set Windows high-performance GPU preference for Minecraft Java runtime"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_discrete_gpu_environment(command: &mut Command) {
+    command
+        .env("DRI_PRIME", "1")
+        .env("__NV_PRIME_RENDER_OFFLOAD", "1")
+        .env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+        .env("__VK_LAYER_NV_optimus", "NVIDIA_only");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_discrete_gpu_environment(_command: &mut Command) {}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_high_performance_gpu_preference(java_path: &Path) -> io::Result<()> {
+    if !is_launcher_managed_java_path(java_path)? {
+        debug!(
+            java = %java_path.display(),
+            "Skipping persistent Windows GPU preference for external Java executable"
+        );
+        return Ok(());
+    }
+
+    let mut command = Command::new("reg");
+    crate::utils::hide_child_console_window(&mut command);
+    let status = command
+        .arg("add")
+        .arg("HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences")
+        .arg("/v")
+        .arg(java_path.as_os_str())
+        .arg("/t")
+        .arg("REG_SZ")
+        .arg("/d")
+        .arg("GpuPreference=2;")
+        .arg("/f")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+
+    if status.success() {
+        debug!(
+            java = %java_path.display(),
+            "Requested Windows high-performance GPU preference for Java runtime"
+        );
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::Other,
+        format!("reg.exe exited with status {status}"),
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn is_launcher_managed_java_path(java_path: &Path) -> io::Result<bool> {
+    if !java_path.is_absolute() {
+        return Ok(false);
+    }
+
+    let runtimes_dir = crate::config::get_config()
+        .resolved_data_dir()?
+        .join("runtimes");
+    let java_path = fs::canonicalize(java_path)?;
+    let Ok(runtimes_dir) = fs::canonicalize(runtimes_dir) else {
+        return Ok(false);
+    };
+
+    Ok(java_path.starts_with(runtimes_dir))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_windows_high_performance_gpu_preference(_java_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn take_child_stdout(child: &mut std::process::Child) -> Result<ChildStdout, MinecraftLaunchError> {

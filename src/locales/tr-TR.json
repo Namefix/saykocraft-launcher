@@ -21,6 +21,7 @@
   "installationDirectory": "Kurulum Dizini",
   "dataDirectory": "Veri Dizini",
   "keepLauncherOpen": "Başlatıcıyı Açık Tut",
+  "preferDiscreteGpu": "Ayrık GPU'yu Tercih Et",
   "language": "Dil",
   "language.englishUS": "İngilizce (ABD)",
   "language.turkish": "Türkçe",

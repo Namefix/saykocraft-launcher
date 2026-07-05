@@ -16,6 +16,8 @@ pub struct Config {
     data_dir: String,
     language: String,
     keep_launcher_open: bool,
+    #[serde(default = "prefer_discrete_gpu_default")]
+    prefer_discrete_gpu: bool,
 }
 
 impl Config {
@@ -30,6 +32,10 @@ impl Config {
     pub fn keep_launcher_open(&self) -> bool {
         self.keep_launcher_open
     }
+
+    pub fn prefer_discrete_gpu(&self) -> bool {
+        self.prefer_discrete_gpu
+    }
 }
 
 impl Default for Config {
@@ -39,11 +45,16 @@ impl Default for Config {
             data_dir: "$SAYKOCRAFT/data".to_string(),
             language: "en-US".to_string(),
             keep_launcher_open: false,
+            prefer_discrete_gpu: prefer_discrete_gpu_default(),
         }
     }
 }
 
 static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
+
+fn prefer_discrete_gpu_default() -> bool {
+    true
+}
 
 pub fn app_data_dir() -> io::Result<PathBuf> {
     // Compiling for Windows
@@ -291,6 +302,10 @@ pub fn update_field(key: &str, value: Value) -> Result<Config, String> {
             "keep_launcher_open" => match value {
                 Value::Bool(b) => cfg.keep_launcher_open = b,
                 _ => return Err("keep_launcher_open must be a boolean".to_string()),
+            },
+            "prefer_discrete_gpu" => match value {
+                Value::Bool(b) => cfg.prefer_discrete_gpu = b,
+                _ => return Err("prefer_discrete_gpu must be a boolean".to_string()),
             },
             _ => return Err(format!("Unknown config key: {}", key)),
         }
