@@ -25,6 +25,11 @@ use crate::instance::{InstanceState, ModLoaderType};
 
 const DEFAULT_OFFLINE_USERNAME: &str = "SayKOPlayer";
 const FORCED_TERMINAL_JVM_ARGS: [&str; 2] = ["-Dterminal.jline=false", "-Dterminal.ansi=true"];
+const DEFAULT_LOCALE_JVM_ARGS: [&str; 3] = [
+    "-Duser.language=en",
+    "-Duser.country=US",
+    "-Duser.region=US",
+];
 const RESERVED_BRIDGE_JVM_ARG_PREFIX: &str = "-Dsaykocraft.bridge.";
 const GAME_WINDOW_READY_FALLBACK_DELAY: Duration = Duration::from_secs(20);
 static RUNNING_INSTANCES: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
@@ -316,6 +321,7 @@ fn build_launch_context(
             .iter()
             .map(|arg| (*arg).to_string()),
     );
+    jvm_args.extend(DEFAULT_LOCALE_JVM_ARGS.iter().map(|arg| (*arg).to_string()));
     jvm_args.extend(filter_user_jvm_args(&manifest.id, options.extra_jvm_args));
 
     let session_bridge = if let Some(session_token) = options.session_token {
