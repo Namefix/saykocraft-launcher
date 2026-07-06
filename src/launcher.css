@@ -400,6 +400,17 @@ body {
     gap: 8px;
 }
 
+.setting-row {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px 32px;
+}
+
+.setting-row .setting-div {
+    flex: 0 0 296px;
+}
+
 .setting-inline {
     display: flex;
     align-items: center;

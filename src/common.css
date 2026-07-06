@@ -52,6 +52,11 @@ button {
     border-color: #DF2121 !important;
 }
 
+.button-disabled {
+    opacity: 0.7;
+    cursor: not-allowed !important;
+}
+
 input[type="text"], input[type="password"], input[type="number"], textarea {
     width: 284px;
     height: 48px;

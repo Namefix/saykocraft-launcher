@@ -43,7 +43,7 @@ impl Default for Config {
         Self {
             install_dir: "$SAYKOCRAFT/instances".to_string(),
             data_dir: "$SAYKOCRAFT/data".to_string(),
-            language: "en-US".to_string(),
+            language: "tr-TR".to_string(),
             keep_launcher_open: false,
             prefer_discrete_gpu: prefer_discrete_gpu_default(),
         }

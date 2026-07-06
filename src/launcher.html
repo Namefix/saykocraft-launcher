@@ -72,27 +72,31 @@
                 <div class="centerpage centerpage-launchersettings" data-page="LAUNCHER_SETTINGS" aria-hidden="true">
                     <div class="settings-div">
                         <span class="settings-title" data-i18n="launcherSettingsTitle">Launcher Settings</span>
-                        <div class="setting-div">
-                            <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
-                            <input type="text" class="setting-textinput" data-config-key="install_dir" data-path-validate>
+                        <div class="setting-row">
+                            <div class="setting-div">
+                                <span class="setting-title" data-i18n="installationDirectory">Installation Directory</span>
+                                <input type="text" class="setting-textinput" data-config-key="install_dir" data-path-validate>
+                            </div>
+                            <div class="setting-div">
+                                <span class="setting-title" data-i18n="dataDirectory">Asset Directory</span>
+                                <input type="text" class="setting-textinput" data-config-key="data_dir" data-path-validate>
+                            </div>
                         </div>
-                        <div class="setting-div">
-                            <span class="setting-title" data-i18n="dataDirectory">Asset Directory</span>
-                            <input type="text" class="setting-textinput" data-config-key="data_dir" data-path-validate>
-                        </div>
-                        <div class="setting-div">
-                            <span class="setting-title" data-i18n="keepLauncherOpen">Keep Launcher Open</span>
-                            <label class="switch setting-checkbox">
-                                <input type="checkbox" data-config-key="keep_launcher_open">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-div">
-                            <span class="setting-title" data-i18n="preferDiscreteGpu">Prefer Discrete GPU</span>
-                            <label class="switch setting-checkbox">
-                                <input type="checkbox" data-config-key="prefer_discrete_gpu">
-                                <span class="slider"></span>
-                            </label>
+                        <div class="setting-row">
+                            <div class="setting-div">
+                                <span class="setting-title" data-i18n="keepLauncherOpen">Keep Launcher Open</span>
+                                <label class="switch setting-checkbox">
+                                    <input type="checkbox" data-config-key="keep_launcher_open">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-div">
+                                <span class="setting-title" data-i18n="preferDiscreteGpu">Prefer Discrete GPU</span>
+                                <label class="switch setting-checkbox">
+                                    <input type="checkbox" data-config-key="prefer_discrete_gpu">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                         </div>
                         <div class="setting-div">
                             <span class="setting-title" data-i18n="language">Language</span>
@@ -128,7 +132,7 @@
                             </div>
                             <div class="modpacksettings-actionbutton-div">
                                 <button onclick="removeInstance()" class="modpacksettings-actionbutton button-danger" data-i18n="action.remove">Remove</button>
-                                <button class="modpacksettings-actionbutton" data-i18n="action.changeVersion">Change Version</button>
+                                <button class="modpacksettings-actionbutton button-disabled" data-i18n="action.changeVersion">Change Version</button>
                                 <button onclick="ensureInstance()" class="modpacksettings-actionbutton" data-i18n="action.repair">Repair</button>
                             </div>
                         </div>
