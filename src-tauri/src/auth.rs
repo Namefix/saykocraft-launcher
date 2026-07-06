@@ -1,6 +1,7 @@
 use keyring_core::{Entry, Error as KeyringError};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::error;
@@ -15,16 +16,20 @@ pub enum AuthError {
     Network(String),
     RateLimited,
     Unauthorized,
+    Banned(Option<i64>),
     UpgradeRequired,
+    Maintenance,
     Client(u16),
     Server(u16),
     InvalidResponse(String),
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct LoginError {
     code: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<i64>,
 }
 
 impl LoginError {
@@ -32,7 +37,45 @@ impl LoginError {
         Self {
             code: code.to_string(),
             message: message.into(),
+            expires_at: None,
         }
+    }
+
+    fn banned(expires_at: Option<i64>) -> Self {
+        Self {
+            code: "BANNED".to_string(),
+            message: "This account is banned.".to_string(),
+            expires_at,
+        }
+    }
+}
+
+pub fn login_error_from_auth_error(err: AuthError) -> LoginError {
+    match err {
+        AuthError::RateLimited => LoginError::new(
+            "RATE_LIMITED",
+            "Too many requests. Please wait and try again.",
+        ),
+        AuthError::Unauthorized => {
+            LoginError::new("INVALID_CREDENTIALS", "Invalid username or password.")
+        }
+        AuthError::Banned(expires_at) => LoginError::banned(expires_at),
+        AuthError::UpgradeRequired => LoginError::new(
+            "UPGRADE_REQUIRED",
+            "Launcher is outdated. Please update to the latest version.",
+        ),
+        AuthError::Maintenance => LoginError::new(
+            "SERVICE_UNAVAILABLE",
+            "Auth service is temporarily unavailable for maintenance.",
+        ),
+        AuthError::Client(status) => {
+            LoginError::new("AUTH_FAILED", format!("Auth failed: {}", status))
+        }
+        AuthError::Server(status) => {
+            LoginError::new("SERVER_ERROR", format!("Server error: {}", status))
+        }
+        AuthError::Network(message) => LoginError::new("NETWORK_ERROR", message),
+        AuthError::InvalidResponse(message) => LoginError::new("BAD_RESPONSE", message),
     }
 }
 
@@ -45,8 +88,16 @@ fn map_auth_status(status: StatusCode) -> AuthError {
         return AuthError::Unauthorized;
     }
 
+    if status == StatusCode::FORBIDDEN {
+        return AuthError::Banned(None);
+    }
+
     if status == StatusCode::UPGRADE_REQUIRED {
         return AuthError::UpgradeRequired;
+    }
+
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return AuthError::Maintenance;
     }
 
     if status.is_client_error() {
@@ -54,6 +105,51 @@ fn map_auth_status(status: StatusCode) -> AuthError {
     }
 
     AuthError::Server(status.as_u16())
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    #[serde(alias = "expiresAt")]
+    expires_at: Option<Value>,
+}
+
+fn f64_to_i64(value: f64) -> Option<i64> {
+    if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
+        return None;
+    }
+
+    Some(value as i64)
+}
+
+fn parse_epoch(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
+            .or_else(|| number.as_f64().and_then(f64_to_i64)),
+        Value::String(value) => value
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .or_else(|| value.trim().parse::<f64>().ok().and_then(f64_to_i64)),
+        _ => None,
+    }
+}
+
+async fn map_auth_response(response: reqwest::Response) -> AuthError {
+    let status = response.status();
+
+    if status == StatusCode::FORBIDDEN {
+        let expires_at = response
+            .json::<ErrorResponse>()
+            .await
+            .ok()
+            .and_then(|body| body.expires_at.as_ref().and_then(parse_epoch));
+
+        return AuthError::Banned(expires_at);
+    }
+
+    map_auth_status(status)
 }
 
 fn is_network_error(err: &reqwest::Error) -> bool {
@@ -107,9 +203,10 @@ pub async fn authenticate(username: &str, password: &str) -> Result<LoginRespons
         .await
         .map_err(|e| AuthError::Network(e.to_string()))?;
 
-    if !response.status().is_success() {
-        error!(response = %response.status(), "Auth failed");
-        return Err(map_auth_status(response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        error!(response = %status, "Auth failed");
+        return Err(map_auth_response(response).await);
     }
 
     response
@@ -134,15 +231,18 @@ pub async fn extend_session(token: &String, username: &String) -> Result<bool, A
 
         match response {
             Ok(response) => {
-                if response.status().is_success() {
+                let status = response.status();
+
+                if status.is_success() {
                     return Ok(true);
                 }
 
-                if response.status().is_client_error() {
+                if status == StatusCode::UNAUTHORIZED || status == StatusCode::NOT_FOUND {
                     return Ok(false);
                 }
 
-                return Err(map_auth_status(response.status()));
+                let error = map_auth_response(response).await;
+                return Err(error);
             }
             Err(e) => {
                 if !is_network_error(&e) {
@@ -192,31 +292,12 @@ pub async fn logout_session(token: &String) -> StatusCode {
 pub async fn login(username: String, password: String) -> Result<String, LoginError> {
     let response = auth::authenticate(&username, &password)
         .await
-        .map_err(|err| match err {
-            AuthError::RateLimited => LoginError::new(
-                "RATE_LIMITED",
-                "Too many requests. Please wait and try again.",
-            ),
-            AuthError::Unauthorized => {
-                LoginError::new("INVALID_CREDENTIALS", "Invalid username or password.")
-            }
-            AuthError::UpgradeRequired => LoginError::new(
-                "UPGRADE_REQUIRED",
-                "Launcher is outdated. Please update to the latest version.",
-            ),
-            AuthError::Client(status) => {
-                LoginError::new("AUTH_FAILED", format!("Auth failed: {}", status))
-            }
-            AuthError::Server(status) => {
-                LoginError::new("SERVER_ERROR", format!("Server error: {}", status))
-            }
-            AuthError::Network(message) => LoginError::new("NETWORK_ERROR", message),
-            AuthError::InvalidResponse(message) => LoginError::new("BAD_RESPONSE", message),
-        })?;
+        .map_err(login_error_from_auth_error)?;
 
     let token_entry = Entry::new("saykocraft-launcher", "session").map_err(|e| LoginError {
         code: "KEYRING_ACCESS".to_string(),
         message: format!("Couldn't access keyring: {}", e),
+        expires_at: None,
     })?;
 
     token_entry
@@ -224,11 +305,13 @@ pub async fn login(username: String, password: String) -> Result<String, LoginEr
         .map_err(|e| LoginError {
             code: "KEYRING_SAVE".to_string(),
             message: format!("Couldn't save token: {}", e),
+            expires_at: None,
         })?;
 
     let username_entry = Entry::new("saykocraft-launcher", "username").map_err(|e| LoginError {
         code: "KEYRING_ACCESS".to_string(),
         message: format!("Couldn't access keyring: {}", e),
+        expires_at: None,
     })?;
 
     username_entry
@@ -236,6 +319,7 @@ pub async fn login(username: String, password: String) -> Result<String, LoginEr
         .map_err(|e| LoginError {
             code: "KEYRING_SAVE".to_string(),
             message: format!("Couldn't save username: {}", e),
+            expires_at: None,
         })?;
 
     Ok("Login successful".to_string())

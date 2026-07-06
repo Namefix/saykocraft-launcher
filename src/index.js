@@ -14,7 +14,7 @@ initializeLocalization();
 
 function showLoginError(message) {
     errorMessage.classList.remove("hidden");
-    errorMessage.innerHTML = message;
+    errorMessage.textContent = message;
 }
 
 function clearSessionError() {
@@ -58,20 +58,77 @@ function setLoginPending(isPending) {
 
 function normalizeInvokeError(err) {
     if (err && typeof err === "object" && "code" in err) {
-        return { code: err.code ?? null, message: err.message ?? null };
+        return {
+            code: err.code ?? null,
+            message: err.message ?? null,
+            expiresAt: err.expires_at ?? err.expiresAt ?? null
+        };
     }
 
     const raw = typeof err === "string" ? err : err?.message;
     if (typeof raw === "string") {
         try {
             const parsed = JSON.parse(raw);
-            return { code: parsed.code ?? null, message: parsed.message ?? raw };
+            return {
+                code: parsed.code ?? null,
+                message: parsed.message ?? raw,
+                expiresAt: parsed.expires_at ?? parsed.expiresAt ?? null
+            };
         } catch {
-            return { code: null, message: raw };
+            return { code: null, message: raw, expiresAt: null };
         }
     }
 
-    return { code: null, message: null };
+    return { code: null, message: null, expiresAt: null };
+}
+
+function normalizeSessionStatus(payload) {
+    if (typeof payload === "string") {
+        return { status: payload, error: null };
+    }
+
+    if (payload && typeof payload === "object") {
+        return {
+            status: payload.status ?? null,
+            error: payload.error ?? null
+        };
+    }
+
+    return { status: null, error: null };
+}
+
+function getLoginErrorMessage(code, message, expiresAt) {
+    switch (code) {
+        case "INVALID_CREDENTIALS":
+            return t("error.loginInvalidCredentials");
+        case "BANNED": {
+            const formattedExpiresAt = formatEpochDateTime(expiresAt);
+            if (formattedExpiresAt) {
+                return t("error.loginBannedUntil", { expiresAt: formattedExpiresAt });
+            }
+
+            return t("error.loginBanned");
+        }
+        case "RATE_LIMITED":
+            return t("error.loginRateLimited");
+        case "AUTH_FAILED":
+            return t("error.loginAuthFailed");
+        case "UPGRADE_REQUIRED":
+            return t("error.loginUpgradeRequired");
+        case "SERVICE_UNAVAILABLE":
+            return t("error.loginMaintenance");
+        case "NETWORK_ERROR":
+            return t("error.loginNetworkError");
+        case "SERVER_ERROR":
+            return t("error.loginServerError");
+        default:
+            return message || t("error.loginUnknownError");
+    }
+}
+
+function showAuthError(err) {
+    const { code, message, expiresAt } = normalizeInvokeError(err);
+    showLoginError(getLoginErrorMessage(code, message, expiresAt));
 }
 
 async function openLauncher() {
@@ -86,19 +143,27 @@ async function openLauncher() {
 
 if (tauriEvent?.listen && invoke) {
   tauriEvent.listen("session-status", (event) => {
-    if (event.payload === "valid") {
+    const { status, error } = normalizeSessionStatus(event.payload);
+
+    if (status === "valid") {
         openLauncher();
         return;
     }
 
-    if (event.payload === "network-error") {
+    if (status === "network-error") {
         showSessionError(t("error.networkError"));
         return;
     }
 
-    if(event.payload === "invalid" || event.payload === "null") {
+    if (status === "error") {
         showLoginScreen();
-        if(event.payload === "invalid") {
+        showAuthError(error);
+        return;
+    }
+
+    if(status === "invalid" || status === "null") {
+        showLoginScreen();
+        if(status === "invalid") {
             showLoginError(t("error.sessionExpired"));
         } else {
             errorMessage.classList.add("hidden");
@@ -140,29 +205,7 @@ async function login() {
         await invoke("login", { username, password });
         await openLauncher();
     } catch (e) {
-        const { code, message } = normalizeInvokeError(e);
-        switch (code) {
-            case "INVALID_CREDENTIALS":
-                showLoginError(t("error.loginInvalidCredentials"));
-                break;
-            case "RATE_LIMITED":
-                showLoginError(t("error.loginRateLimited"));
-                break;
-            case "AUTH_FAILED":
-                showLoginError(t("error.loginAuthFailed"));
-                break;
-            case "UPGRADE_REQUIRED":
-                showLoginError(t("error.loginUpgradeRequired"));
-                break;
-            case "NETWORK_ERROR":
-                showLoginError(t("error.loginNetworkError"));
-                break;
-            case "SERVER_ERROR":
-                showLoginError(t("error.loginServerError"));
-                break;
-            default:
-                showLoginError(message || t("error.loginUnknownError"));
-        }
+        showAuthError(e);
     } finally {
         setLoginPending(false);
     }

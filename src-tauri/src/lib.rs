@@ -40,6 +40,29 @@ struct InstanceSettingsResponse {
     recommended_ram_mb: u64,
 }
 
+#[derive(Clone, Serialize)]
+struct SessionStatusPayload {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<auth::LoginError>,
+}
+
+impl SessionStatusPayload {
+    fn status(status: &'static str) -> Self {
+        Self {
+            status,
+            error: None,
+        }
+    }
+
+    fn error(error: auth::LoginError) -> Self {
+        Self {
+            status: "error",
+            error: Some(error),
+        }
+    }
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -136,16 +159,19 @@ async fn check_session(app: tauri::AppHandle) -> Result<(), String> {
     try_extend_session(app).await
 }
 
+fn emit_session_status(app: &AppHandle, payload: SessionStatusPayload) -> Result<(), String> {
+    app.emit("session-status", payload)
+        .map_err(|e| e.to_string())
+}
+
 async fn try_extend_session(app: AppHandle) -> Result<(), String> {
     let Some(session_token) = auth::get_session_token().await? else {
-        app.emit("session-status", "null")
-            .map_err(|e| e.to_string())?;
+        emit_session_status(&app, SessionStatusPayload::status("null"))?;
         return Ok(());
     };
 
     let Some(username) = get_username().await? else {
-        app.emit("session-status", "null")
-            .map_err(|e| e.to_string())?;
+        emit_session_status(&app, SessionStatusPayload::status("null"))?;
         return Ok(());
     };
 
@@ -153,24 +179,23 @@ async fn try_extend_session(app: AppHandle) -> Result<(), String> {
         Ok(true) => {
             info!("Session extended");
             // proceed to launcher
-            app.emit("session-status", "valid")
-                .map_err(|e| e.to_string())?;
+            emit_session_status(&app, SessionStatusPayload::status("valid"))?;
         }
         Ok(false) => {
             info!("Session expired or invalid");
             // stay on login page
-            app.emit("session-status", "invalid")
-                .map_err(|e| e.to_string())?;
+            emit_session_status(&app, SessionStatusPayload::status("invalid"))?;
         }
         Err(AuthError::Network(message)) => {
             warn!("Failed to extend session: {message}");
-            app.emit("session-status", "network-error")
-                .map_err(|e| e.to_string())?;
+            emit_session_status(&app, SessionStatusPayload::status("network-error"))?;
         }
         Err(e) => {
             warn!(?e, "Failed to extend session");
-            app.emit("session-status", "invalid")
-                .map_err(|e| e.to_string())?;
+            emit_session_status(
+                &app,
+                SessionStatusPayload::error(auth::login_error_from_auth_error(e)),
+            )?;
         }
     }
 

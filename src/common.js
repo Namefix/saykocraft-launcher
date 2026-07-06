@@ -5,6 +5,45 @@ const tauriEvent = window.__TAURI__?.event;
 
 const pressedKeys = new Set();
 
+function getUserTimeZone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function epochToDate(value) {
+    const epoch = Number(value);
+    if (!Number.isFinite(epoch) || epoch <= 0) {
+        return null;
+    }
+
+    const timestamp = epoch > 9999999999 ? epoch : epoch * 1000;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    return date;
+}
+
+function formatEpochDateTime(value, options = {}) {
+    const date = epochToDate(value);
+    if (!date) {
+        return null;
+    }
+
+    const locale = options.locale ?? document.documentElement.lang ?? undefined;
+    const timeZone = options.timeZone ?? getUserTimeZone();
+
+    return new Intl.DateTimeFormat(locale, {
+        dateStyle: options.dateStyle ?? "medium",
+        timeStyle: options.timeStyle ?? "short",
+        ...(timeZone ? { timeZone } : {})
+    }).format(date);
+}
+
 function isReloadShortcut(e) {
     const key = e.key?.toLowerCase();
 
