@@ -62,7 +62,7 @@
   "installphase.minecraft_libraries": "Downloading Minecraft Libraries",
   "installphase.minecraft_assets": "Downloading Minecraft Assets",
   "installphase.minecraft_natives": "Downloading Minecraft Native Files",
-  "installphase.neoforge": "Setting up NeoForge",
+  "installphase.neo_forge": "Setting up NeoForge",
   "installphase.modpack_files": "Downloading Modpack Files",
   "installphase.finalizing": "Finalizing",
   "installphase.done": "Done"

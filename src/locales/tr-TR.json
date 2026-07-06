@@ -62,7 +62,7 @@
   "installphase.minecraft_libraries": "Minecraft Kütüphaneleri İndiriliyor",
   "installphase.minecraft_assets": "Minecraft Kaynakları İndiriliyor",
   "installphase.minecraft_natives": "Mineraft Yerel Dosyaları İndiriliyor",
-  "installphase.neoforge": "NeoForge Kuruluyor",
+  "installphase.neo_forge": "NeoForge Kuruluyor",
   "installphase.modpack_files": "Modpaketi Dosyaları İndiriliyor",
   "installphase.finalizing": "Tamamlanıyor",
   "installphase.done": "Tamamlandı"
