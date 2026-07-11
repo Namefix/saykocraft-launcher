@@ -3,6 +3,7 @@
   "error.networkError": "Ağ hatası. Lütfen bağlantınızı kontrol edip yeniden deneyin.",
   "error.sessionExpired": "Oturumunuzun süresi doldu.",
   "error.loginInvalidCredentials": "Kullanıcı adı veya parola yanlış!",
+  "error.loginAccountNotApproved": "Hesabınız henüz onaylanmadı!",
   "error.loginBanned": "Bu hesap yasaklanmış.",
   "error.loginBannedUntil": "Bu hesap {expiresAt} tarihine kadar yasaklanmış.",
   "error.loginRateLimited": "Kısa sürede fazla istek. Lütfen bekleyip tekrar deneyin.",

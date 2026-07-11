@@ -16,6 +16,7 @@ pub enum AuthError {
     Network(String),
     RateLimited,
     Unauthorized,
+    AccountNotApproved,
     Banned(Option<i64>),
     UpgradeRequired,
     Maintenance,
@@ -59,6 +60,10 @@ pub fn login_error_from_auth_error(err: AuthError) -> LoginError {
         AuthError::Unauthorized => {
             LoginError::new("INVALID_CREDENTIALS", "Invalid username or password.")
         }
+        AuthError::AccountNotApproved => LoginError::new(
+            "ACCOUNT_NOT_APPROVED",
+            "Your account has not been approved yet!",
+        ),
         AuthError::Banned(expires_at) => LoginError::banned(expires_at),
         AuthError::UpgradeRequired => LoginError::new(
             "UPGRADE_REQUIRED",
@@ -107,12 +112,6 @@ fn map_auth_status(status: StatusCode) -> AuthError {
     AuthError::Server(status.as_u16())
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    #[serde(alias = "expiresAt")]
-    expires_at: Option<Value>,
-}
-
 fn f64_to_i64(value: f64) -> Option<i64> {
     if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
         return None;
@@ -140,11 +139,33 @@ async fn map_auth_response(response: reqwest::Response) -> AuthError {
     let status = response.status();
 
     if status == StatusCode::FORBIDDEN {
-        let expires_at = response
-            .json::<ErrorResponse>()
-            .await
-            .ok()
-            .and_then(|body| body.expires_at.as_ref().and_then(parse_epoch));
+        let body = response.text().await.unwrap_or_default();
+        let parsed_body = serde_json::from_str::<Value>(&body).ok();
+        let message = parsed_body
+            .as_ref()
+            .and_then(|value| {
+                value.as_str().or_else(|| {
+                    value.as_object().and_then(|object| {
+                        ["message", "error", "detail"]
+                            .iter()
+                            .find_map(|key| object.get(*key).and_then(Value::as_str))
+                    })
+                })
+            })
+            .unwrap_or(body.trim());
+
+        if message.trim() == "Account not yet created" {
+            return AuthError::AccountNotApproved;
+        }
+
+        let expires_at = parsed_body.as_ref().and_then(|value| {
+            value.as_object().and_then(|object| {
+                object
+                    .get("expires_at")
+                    .or_else(|| object.get("expiresAt"))
+                    .and_then(parse_epoch)
+            })
+        });
 
         return AuthError::Banned(expires_at);
     }

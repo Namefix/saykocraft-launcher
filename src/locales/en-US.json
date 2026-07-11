@@ -3,6 +3,7 @@
   "error.networkError": "Network error. Please check your connection and try again.",
   "error.sessionExpired": "Your session has expired.",
   "error.loginInvalidCredentials": "Username or password is incorrect!",
+  "error.loginAccountNotApproved": "Your account has not been approved yet!",
   "error.loginBanned": "This account is banned.",
   "error.loginBannedUntil": "This account is banned until {expiresAt}.",
   "error.loginRateLimited": "Too many requests. Please wait and try again.",

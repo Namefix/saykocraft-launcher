@@ -101,6 +101,8 @@ function getLoginErrorMessage(code, message, expiresAt) {
     switch (code) {
         case "INVALID_CREDENTIALS":
             return t("error.loginInvalidCredentials");
+        case "ACCOUNT_NOT_APPROVED":
+            return t("error.loginAccountNotApproved");
         case "BANNED": {
             const formattedExpiresAt = formatEpochDateTime(expiresAt);
             if (formattedExpiresAt) {
