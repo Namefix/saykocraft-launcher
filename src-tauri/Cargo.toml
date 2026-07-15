@@ -1,6 +1,6 @@
 [package]
 name = "saykocraft-launcher"
-version = "0.2.0-beta"
+version = "0.2.0"
 description = "Launcher for SayKOCraft Minecraft Server network."
 authors = ["SayKOCraft", "Namefix"]
 edition = "2021"
